@@ -269,7 +269,7 @@ jobs:
 
       - name: Tag and Push Go Module
         run: |
-          TAG_NAME="golang/bulldb/v${{ env.VERSION }}"
+          TAG_NAME="golang/v${{ env.VERSION }}"
           echo "Tagging repository with $TAG_NAME for Go Module Import path"
           
           # Delete local/remote tags if they already exist to allow override/re-runs
