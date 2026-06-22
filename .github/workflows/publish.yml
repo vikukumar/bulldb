@@ -259,41 +259,10 @@ jobs:
           name: cargo-artifact
           path: cargo-out/
 
-  # 5. Push Git tag for Go package compatibility
-  publish-go-tag:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Sync Versions with Build Number
-        run: python sync_versions.py --build-number ${{ github.run_number }}
-
-      - name: Configure Git Author
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Tag and Push Go Module
-        run: |
-          TAG_NAME="golang/v${{ env.VERSION }}"
-          echo "Tagging repository with $TAG_NAME for Go Module Import path"
-          
-          # Delete local/remote tags if they already exist to allow override/re-runs
-          git tag -d "$TAG_NAME" || true
-          git push origin :refs/tags/"$TAG_NAME" || true
-          
-          git tag "$TAG_NAME"
-          if ! git push origin "$TAG_NAME"; then
-            echo "WARNING: Failed to push git tag. Please ensure that 'Workflow permissions' in your repository Settings -> Actions -> General is set to 'Read and write permissions', or provide a valid 'PERSONAL_ACCESS_TOKEN' secret with write access."
-          fi
-
-  # 6. Create Git Release and Upload Package Files
+  # 5. Create Git Release and Upload Package Files
   create-release:
     runs-on: ubuntu-latest
-    needs: [publish-npm, publish-pypi, publish-nuget, publish-crates-io, publish-go-tag]
+    needs: [publish-npm, publish-pypi, publish-nuget, publish-crates-io]
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v3

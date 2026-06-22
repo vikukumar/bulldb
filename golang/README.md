@@ -13,7 +13,7 @@ With BullDB, you define a single Active Record model struct and query it seamles
 Initialize your Go module (if not already done) and get the package:
 
 ```bash
-go get github.com/vikukumar/bulldb/golang
+go get github.com/vikukumar/bulldb/golang/bulldb
 ```
 
 ---
