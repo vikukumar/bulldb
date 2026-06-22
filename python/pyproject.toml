@@ -19,10 +19,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-[project.urls]
-Homepage = "https://bulldb.vikshro.in"
-Repository = "https://github.com/vikukumar/bulldb.git"
-Issues = "https://github.com/vikukumar/bulldb/issues"
 dependencies = [
     "pydantic>=2.0.0",
     "cryptography>=41.0.0",
@@ -32,6 +28,11 @@ dependencies = [
     "httpx>=0.24.0",
     "redis>=5.0.0"
 ]
+
+[project.urls]
+Homepage = "https://bulldb.vikshro.in"
+Repository = "https://github.com/vikukumar/bulldb.git"
+Issues = "https://github.com/vikukumar/bulldb/issues"
 
 [project.optional-dependencies]
 test = [
