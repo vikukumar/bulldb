@@ -66,5 +66,19 @@ def main():
         f.write(f'package bulldb\n\nconst Version = "{version}"\n')
     print("Updated golang/bulldb/version.go")
 
+    # Copy LICENSE.md to all subdirectories to ensure it is always present during builds
+    import shutil
+    subprojects = [
+        "typescript",
+        "python",
+        "rust/bulldb",
+        "csharp/BullDB",
+        "golang"
+    ]
+    for sp in subprojects:
+        if os.path.exists(sp):
+            shutil.copy("LICENSE.md", sp)
+            print(f"Copied LICENSE.md to {sp}/")
+
 if __name__ == "__main__":
     main()
