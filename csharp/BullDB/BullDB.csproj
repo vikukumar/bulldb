@@ -9,7 +9,8 @@
     <Authors>Vikukumar</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/vikukumar/bulldb.git</RepositoryUrl>
+    <RepositoryUrl>https://github.com/vikukumar/bulldb</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://bulldb.vikshro.in</PackageProjectUrl>
     <PackageTags>orm;database;sql;nosql;vector-search;graph</PackageTags>
   </PropertyGroup>

@@ -18,14 +18,20 @@ def main():
         except (ValueError, IndexError):
             pass
 
-    if build_number:
-        version_py = f"{base_version}.{build_number}"
-        version_dotnet = f"{base_version}.{build_number}"
-        version_semver = f"{base_version}-{build_number}"
+    version_parts = base_version.split('.')
+    if len(version_parts) >= 2:
+        major_minor = f"{version_parts[0]}.{version_parts[1]}"
     else:
-        version_py = base_version
-        version_dotnet = base_version
-        version_semver = base_version
+        major_minor = base_version
+
+    if build_number:
+        version_all = f"{major_minor}.{build_number}"
+    else:
+        version_all = base_version
+
+    version_py = version_all
+    version_dotnet = version_all
+    version_semver = version_all
 
     print(f"Syncing Python version: {version_py}")
     print(f"Syncing C# version: {version_dotnet}")
