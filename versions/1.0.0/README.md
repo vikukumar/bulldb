@@ -5,7 +5,7 @@
 [![PyPI Version](https://img.shields.io/pypi/v/bulldb.svg?logo=python&logoColor=white)](https://pypi.org/project/bulldb/)
 [![NuGet Version](https://img.shields.io/nuget/v/BullDB.svg?logo=nuget&logoColor=white)](https://www.nuget.org/packages/BullDB/)
 [![Crates.io Version](https://img.shields.io/crates/v/bulldb.svg?logo=rust&logoColor=white)](https://crates.io/crates/bulldb)
-[![Go Reference](https://img.shields.io/badge/go-reference-00ADD8?logo=go&logoColor=white)](https://pkg.go.dev/github.com/vikukumar/bulldb/golang/bulldb)
+[![Go Reference](https://img.shields.io/badge/go-reference-00ADD8?logo=go&logoColor=white)](https://pkg.go.dev/github.com/vikukumar/bulldb@v1.0.15)
 
 BullDB is the world's most advanced cross-language ORM/ODM/Data Access Framework. It enables you to define a single model definition and query it across relational SQL engines (PostgreSQL, SQLite), document stores (MongoDB), key-value stores (Redis), vector engines, graph nodes, and search nodes under a single unified schema-driven active record layer. 
 
@@ -89,7 +89,7 @@ SecurityEngine.setEncryptionKey(Buffer.from("my-custom-super-secret-key-32b-leng
 
 #### Go
 ```go
-import "bulldb/bulldb"
+import "github.com/vikukumar/bulldb/golang/bulldb"
 
 // Runtime key override
 bulldb.SetEncryptionKey([]byte("my-custom-super-secret-key-32b-length"))
