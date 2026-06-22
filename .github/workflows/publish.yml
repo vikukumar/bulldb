@@ -297,3 +297,9 @@ jobs:
             release-assets/* \
             --title "Release $TAG_NAME" \
             --notes "BullDB multi-language SDK release package files for version ${{ env.VERSION }}. Includes package builds for NPM, PyPI, NuGet, and Crates.io."
+
+      - name: Trigger Go Proxy Fetch
+        run: |
+          VERSION_TAG="v${{ env.VERSION }}"
+          echo "Requesting Go proxy to cache $VERSION_TAG..."
+          curl -s "https://proxy.golang.org/github.com/vikukumar/bulldb/@v/$VERSION_TAG.info"
