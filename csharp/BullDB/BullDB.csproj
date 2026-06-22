@@ -5,6 +5,17 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>One Model. Every Database. Advanced cross-language ORM/ODM supporting SQL, NoSQL, Vector, and Graph engines.</Description>
+    <Authors>Vikukumar</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/vikukumar/bulldb.git</RepositoryUrl>
+    <PackageProjectUrl>https://bulldb.vikshro.in</PackageProjectUrl>
+    <PackageTags>orm;database;sql;nosql;vector-search;graph</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\"/>
+  </ItemGroup>
 
 </Project>

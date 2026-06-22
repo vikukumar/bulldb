@@ -1,12 +1,30 @@
 {
   "name": "@vikukumar/bulldb",
   "version": "1.0.0",
-  "description": "One Model. Every Database.",
+  "description": "One Model. Every Database. Advanced cross-language ORM/ODM supporting SQL, NoSQL, Vector, and Graph engines.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vikukumar/bulldb.git"
+  },
+  "homepage": "https://bulldb.vikshro.in",
+  "keywords": [
+    "orm",
+    "odm",
+    "database",
+    "sql",
+    "nosql",
+    "vector",
+    "graph",
+    "rag"
+  ],
   "files": [
     "dist",
-    "src"
+    "src",
+    "README.md",
+    "LICENSE.md"
   ],
   "publishConfig": {
     "access": "public",

@@ -2,6 +2,14 @@
 name = "bulldb"
 version = "1.0.0"
 edition = "2021"
+authors = ["Vikukumar"]
+description = "One Model. Every Database. Advanced cross-language ORM/ODM supporting SQL, NoSQL, Vector, and Graph engines."
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/vikukumar/bulldb"
+homepage = "https://bulldb.vikshro.in"
+keywords = ["orm", "database", "sql", "nosql", "vector"]
+categories = ["database-implementations", "development-tools"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
