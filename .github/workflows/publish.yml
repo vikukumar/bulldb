@@ -61,6 +61,12 @@ jobs:
         if: ${{ env.NPM_TOKEN != '' }}
         run: |
           cd typescript
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VER=$(node -p "require('./package.json').version")
+          echo "Attempting to unpublish $PKG_NAME@$PKG_VER if it exists to allow replacement..."
+          npm unpublish "$PKG_NAME@$PKG_VER" --force || true
+          
+          echo "Publishing package..."
           npm publish --access public || echo "Package version already published on NPM, skipping."
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -70,6 +76,13 @@ jobs:
           cd typescript
           echo "@vikukumar:registry=https://npm.pkg.github.com" > .npmrc
           echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" >> .npmrc
+          
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VER=$(node -p "require('./package.json').version")
+          echo "Attempting to unpublish $PKG_NAME@$PKG_VER from GitHub Packages..."
+          npm unpublish "$PKG_NAME@$PKG_VER" --force || true
+          
+          echo "Publishing package..."
           npm publish || echo "Package already published to GitHub Packages, skipping."
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

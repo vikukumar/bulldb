@@ -4,7 +4,11 @@
   "description": "One Model. Every Database. Advanced cross-language ORM/ODM supporting SQL, NoSQL, Vector, and Graph engines.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "author": "Vikukumar",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/vikukumar/bulldb/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vikukumar/bulldb.git"
