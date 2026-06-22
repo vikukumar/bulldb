@@ -1,5 +1,5 @@
 {
-  "name": "bulldb",
+  "name": "@vikukumar/bulldb",
   "version": "1.0.0",
   "description": "One Model. Every Database.",
   "main": "dist/index.js",
