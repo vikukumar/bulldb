@@ -244,7 +244,23 @@ jobs:
         if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
         run: |
           cd rust/bulldb
-          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty || echo "Warning: Failed to publish to Crates.io. Please check that: 1. Your crates.io account has a verified email address (https://crates.io/settings/profile). 2. Your CARGO_REGISTRY_TOKEN secret is correct. 3. The version does not already exist on crates.io."
+          set +e
+          OUTPUT=$(cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}" --allow-dirty 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+          set -e
+          if [ $EXIT_CODE -ne 0 ]; then
+            if echo "$OUTPUT" | grep -q -i "already uploaded"; then
+              echo "Crate version is already uploaded on crates.io. Skipping."
+              exit 0
+            else
+              echo "::error::Failed to publish to crates.io."
+              echo "::error::Please ensure that:"
+              echo "::error::1. Your crates.io account has a verified email address (https://crates.io/settings/profile)."
+              echo "::error::2. Your API token is valid and has both 'publish-new' and 'publish-update' scopes."
+              exit $EXIT_CODE
+            fi
+          fi
 
       - name: Pack Cargo Package
         run: |
