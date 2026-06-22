@@ -301,7 +301,7 @@ jobs:
       - name: Download all Package Artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: *-artifact
+          pattern: "*-artifact"
           path: release-assets
           merge-multiple: true
         continue-on-error: true
