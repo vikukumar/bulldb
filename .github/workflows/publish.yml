@@ -19,6 +19,7 @@ name: Publish Packages
 permissions:
   contents: write
   id-token: write
+  packages: write
 
 on:
   push:
@@ -63,6 +64,15 @@ jobs:
           npm publish --access public || echo "Package version already published on NPM, skipping."
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish Package to GitHub Packages
+        run: |
+          cd typescript
+          echo "@vikukumar:registry=https://npm.pkg.github.com" > .npmrc
+          echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" >> .npmrc
+          npm publish || echo "Package already published to GitHub Packages, skipping."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # 2. Publish Python package to PyPI
   publish-pypi:
@@ -153,6 +163,10 @@ jobs:
           else
             echo "No API key found. Skipping NuGet publish."
           fi
+
+      - name: Publish Package to GitHub Packages (NuGet)
+        run: |
+          dotnet nuget push out/*.nupkg --api-key "${{ secrets.GITHUB_TOKEN }}" --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --skip-duplicate || echo "GitHub NuGet push failed (might already exist)."
 
   # 4. Publish Rust package to Crates.io
   publish-crates-io:
