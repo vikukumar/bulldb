@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bulldb-app
+  labels:
+    app: bulldb-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bulldb-app
+  template:
+    metadata:
+      labels:
+        app: bulldb-app
+    spec:
+      containers:
+        - name: app
+          image: bulldb-app:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: database-url
+            - name: MONGO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: mongo-url
+            - name: BULLDB_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: encryption-key
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+type: Opaque
+data:
+  # Base64 encoded: postgresql://postgres:password@postgres:5432/bulldb
+  database-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBhc3N3b3JkQHBvc3RncmVzOjU0MzIvYnVsbGRi
+  # Base64 encoded: mongodb://root:password@mongodb:27017/bulldb
+  mongo-url: bW9uZ29kYjovL3Jvb3Q6cGFzc3dvcmRAbW9uZ29kYjoyNzAxNy9idWxsZGI=
+  # Base64 encoded: myMasterEncryptionKeyForBullDBEncryptionSecret
+  encryption-key: bXlNYXN0ZXJFbmNyeXB0aW9uS2V5Rm9yQnVsbERCRW5jcnlwdGlvblNlY3JldA==

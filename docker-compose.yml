@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # SQL (Postgres with pgvector extension support)
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    container_name: bulldb-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: bulldb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # NoSQL (MongoDB)
+  mongodb:
+    image: mongo:6.0
+    container_name: bulldb-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: bulldb
+    volumes:
+      - mongodata:/data/db
+
+  # Graph (Neo4j)
+  neo4j:
+    image: neo4j:5.9
+    container_name: bulldb-neo4j
+    ports:
+      - "7474:7474" # HTTP Dashboard
+      - "7687:7687" # Bolt Protocol
+    environment:
+      NEO4J_AUTH: neo4j/password
+    volumes:
+      - neo4jdata:/data
+
+  # Cache (Redis)
+  redis:
+    image: redis:7.0-alpine
+    container_name: bulldb-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+  # Search Engine (Meilisearch)
+  meilisearch:
+    image: getmeili/meilisearch:v1.2
+    container_name: bulldb-meilisearch
+    ports:
+      - "7700:7700"
+    environment:
+      MEILI_MASTER_KEY: password
+    volumes:
+      - meilisearchdata:/meili_data
+
+volumes:
+  pgdata:
+  mongodata:
+  neo4jdata:
+  redisdata:
+  meilisearchdata:

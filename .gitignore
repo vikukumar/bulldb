@@ -1,0 +1,65 @@
+# OS files
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+
+# IDE and Editor configs
+.vscode/
+.idea/
+*.suo
+*.user
+*.suo
+*.suo
+*.sln.docstates
+.vs/
+.gemini/
+
+# Local Environment secrets
+.env
+.env.local
+.env.*.local
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+ENV/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+
+# Node/TypeScript
+node_modules/
+dist/
+lib-cov/
+coverage/
+.npm
+.eslintcache
+.parcel-cache
+.cache
+
+# Go
+bin/
+*.exe
+*.test
+*.prof
+vendor/
+
+# Rust
+target/
+target_custom_test/
+**/*.rs.bk
+
+# C# / .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.userosscache
+*.sln.docstates
+/out/

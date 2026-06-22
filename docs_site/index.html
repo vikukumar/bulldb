@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- SEO Optimization -->
+    <title>BullDB | One Model. Every Database. Universal ORM/ODM</title>
+    <meta name="description" content="BullDB is the ultimate cross-language database engine & ORM. Unifying relational SQL, document NoSQL, key-value, vector, and graph databases under a single model structure. Supporting Python, TypeScript, Go, Rust, and C#.">
+    <meta name="keywords" content="ORM, ODM, Database, Python, TypeScript, Go, Rust, C#, SQL, NoSQL, Vector Search, Graph Database, RAG, Open Source">
+    <meta name="author" content="Vikukumar">
+    <link rel="canonical" href="https://bulldb.vikshro.in" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://bulldb.vikshro.in">
+    <meta property="og:title" content="BullDB | One Model. Every Database.">
+    <meta property="og:description" content="Advanced cross-language database framework for SQL, NoSQL, Vector, and Graph engines. Write once, run on any database.">
+    <meta property="og:image" content="https://bulldb.vikshro.in/assets/logo.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://bulldb.vikshro.in">
+    <meta property="twitter:title" content="BullDB | One Model. Every Database.">
+    <meta property="twitter:description" content="Advanced cross-language database framework for SQL, NoSQL, Vector, and Graph engines. Write once, run on any database.">
+    <meta property="twitter:image" content="https://bulldb.vikshro.in/assets/logo.png">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Scripts (Marked.js for MD, Lucide for Icons) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <!-- Top Progress Bar -->
+    <div id="progress-bar"></div>
+
+    <!-- Navigation Header -->
+    <header class="navbar">
+        <div class="navbar-container">
+            <a href="#" class="brand" id="brand-link">
+                <img src="assets/logo.png" alt="BullDB Logo" class="brand-logo">
+                <span class="brand-name">BullDB</span>
+            </a>
+
+            <!-- Search Bar -->
+            <div class="search-container">
+                <i data-lucide="search" class="search-icon"></i>
+                <input type="text" id="search-input" placeholder="Search documentation..." autocomplete="off">
+                <div id="search-results" class="search-dropdown"></div>
+            </div>
+
+            <!-- Header Actions -->
+            <div class="nav-actions">
+                <div class="version-select-wrapper">
+                    <select id="version-select" aria-label="Documentation Version">
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+
+                <button id="theme-toggle" class="icon-btn" aria-label="Toggle Theme">
+                    <i data-lucide="sun" class="sun-icon"></i>
+                    <i data-lucide="moon" class="moon-icon"></i>
+                </button>
+
+                <a href="https://github.com/vikukumar/bulldb" target="_blank" rel="noopener" class="icon-btn" aria-label="GitHub Repository">
+                    <i data-lucide="github"></i>
+                </a>
+
+                <!-- Mobile Menu Button -->
+                <button id="mobile-toggle" class="icon-btn mobile-only" aria-label="Toggle Navigation">
+                    <i data-lucide="menu"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Docs Container -->
+    <div class="main-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar-nav">
+            <div class="sidebar-wrapper">
+                <nav class="sidebar-menu">
+                    <div class="menu-section">
+                        <h4 class="menu-title">Getting Started</h4>
+                        <ul class="menu-list">
+                            <li><a href="#readme" class="menu-link active" data-page="README">Overview & Install</a></li>
+                            <li><a href="#vision" class="menu-link" data-page="vision">Vision & Mission</a></li>
+                        </ul>
+                    </div>
+                    <div class="menu-section">
+                        <h4 class="menu-title">Architecture</h4>
+                        <ul class="menu-list">
+                            <li><a href="#architecture" class="menu-link" data-page="architecture">Core Design</a></li>
+                            <li><a href="#diagrams" class="menu-link" data-page="diagrams">System Diagrams</a></li>
+                        </ul>
+                    </div>
+                </nav>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <div class="content-wrapper">
+                <!-- Hero section visible on welcome/README -->
+                <div id="hero-banner" class="hero-section">
+                    <div class="hero-glow"></div>
+                    <div class="hero-content">
+                        <h1>One Model. <span class="gradient-text">Every Database.</span></h1>
+                        <p class="hero-subtitle">The advanced cross-language ORM & ODM framework for relational SQL, document NoSQL, key-value, vector, and graph databases.</p>
+                        <div class="hero-buttons">
+                            <a href="#readme" class="btn btn-primary">Get Started <i data-lucide="arrow-right"></i></a>
+                            <a href="https://github.com/vikukumar/bulldb" target="_blank" rel="noopener" class="btn btn-secondary"><i data-lucide="github"></i> View GitHub</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Markdown Content Render Target -->
+                <article class="markdown-body fade-in" id="doc-content">
+                    <!-- Loaded dynamically -->
+                    <div class="loading-container">
+                        <div class="spinner"></div>
+                        <p>Loading documentation...</p>
+                    </div>
+                </article>
+
+                <!-- Page Footer Navigation -->
+                <footer class="doc-footer">
+                    <div class="footer-nav">
+                        <a href="#" id="prev-link" class="footer-nav-link prev">
+                            <span class="nav-desc"><i data-lucide="arrow-left"></i> Previous</span>
+                            <span class="nav-title">Page Title</span>
+                        </a>
+                        <a href="#" id="next-link" class="footer-nav-link next">
+                            <span class="nav-desc">Next <i data-lucide="arrow-right"></i></span>
+                            <span class="nav-title">Page Title</span>
+                        </a>
+                    </div>
+                    <div class="footer-copyright">
+                        <p>&copy; 2026 BullDB. Released under the MIT License.</p>
+                    </div>
+                </footer>
+            </div>
+        </main>
+
+        <!-- Right Side Table of Contents (Outline) -->
+        <aside class="right-toc" id="right-toc">
+            <div class="toc-wrapper">
+                <h4 class="toc-title">On This Page</h4>
+                <ul class="toc-list" id="toc-list">
+                    <!-- Populated dynamically from rendered markdown headings -->
+                </ul>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Script Entry -->
+    <script src="app.js"></script>
+</body>
+</html>

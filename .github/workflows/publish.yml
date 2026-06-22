@@ -1,0 +1,163 @@
+# BullDB Multi-Language Package Publication Pipeline
+# --------------------------------------------------
+#
+# This GitHub Actions workflow automates the publication of BullDB to multiple
+# language package managers. It is designed to be triggered on release creation
+# or triggered manually via workflow_dispatch.
+#
+# Prerequisite GitHub Secrets:
+# 1. NPM_TOKEN: Authentication token for npmjs.org.
+# 2. PYPI_API_TOKEN: API token for pypi.org (requires prefix "pypi-").
+# 3. NUGET_API_KEY: API key for nuget.org.
+# 4. CARGO_REGISTRY_TOKEN: API token for crates.io.
+# 5. PERSONAL_ACCESS_TOKEN: A GitHub PAT with write access to push tags if the default GITHUB_TOKEN has insufficient rights.
+#
+# To Sync package versions, modify "version.json" at the repository root and run "python sync_versions.py".
+
+name: Publish Packages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # 1. Publish TypeScript/Node package to NPM
+  publish-npm:
+    if: ${{ secrets.NPM_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org/'
+
+      - name: Install Dependencies
+        run: |
+          cd typescript
+          npm ci
+
+      - name: Build JS & TS Typings
+        run: |
+          cd typescript
+          npm run build
+
+      - name: Publish Package to NPM
+        run: |
+          cd typescript
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # 2. Publish Python package to PyPI
+  publish-pypi:
+    if: ${{ secrets.PYPI_API_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python Environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Build Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build Source and Wheel Distributions
+        run: |
+          cd python
+          python -m build
+
+      - name: Publish Package to PyPI
+        run: |
+          cd python
+          twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+
+  # 3. Publish C# package to NuGet
+  publish-nuget:
+    if: ${{ secrets.NUGET_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore csharp/BullDB/BullDB.csproj
+
+      - name: Build and Pack Release
+        run: |
+          dotnet pack csharp/BullDB/BullDB.csproj -c Release -o out
+
+      - name: Publish Package to NuGet
+        run: |
+          dotnet nuget push out/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  # 4. Publish Rust package to Crates.io
+  publish-crates-io:
+    if: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Package Verification
+        run: |
+          cd rust/bulldb
+          cargo package
+
+      - name: Publish Package to Crates.io
+        run: |
+          cd rust/bulldb
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # 5. Push Git tag for Go package compatibility
+  publish-go-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Read Current Version
+        id: get_version
+        run: |
+          VERSION=$(jq -r '.version' version.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Configure Git Author
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Tag and Push Go Module
+        run: |
+          TAG_NAME="golang/bulldb/v${{ env.VERSION }}"
+          echo "Tagging repository with $TAG_NAME for Go Module Import path"
+          
+          # Delete local/remote tags if they already exist to allow override/re-runs
+          git tag -d "$TAG_NAME" || true
+          git push origin :refs/tags/"$TAG_NAME" || true
+          
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"

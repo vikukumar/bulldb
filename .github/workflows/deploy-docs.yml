@@ -1,0 +1,107 @@
+name: Deploy Documentation Site
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+        with:
+          path: main-repo
+
+      - name: Read Current Version
+        id: get_version
+        run: |
+          VERSION=$(jq -r '.version' main-repo/version.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Checkout GitHub Pages Branch
+        uses: actions/checkout@v3
+        with:
+          ref: gh-pages
+          path: pages-repo
+        continue-on-error: true # Let it fail on the first run if gh-pages branch doesn't exist yet
+
+      - name: Initialize Pages Repo if missing
+        run: |
+          if [ ! -d "pages-repo" ]; then
+            echo "Initializing gh-pages branch folder..."
+            mkdir pages-repo
+            cd pages-repo
+            git init
+            git checkout -b gh-pages
+            cd ..
+          fi
+
+      - name: Copy Website Core Files
+        run: |
+          # Copy site index.html, style.css, app.js, CNAME and assets
+          cp -r main-repo/docs_site/* pages-repo/
+
+      - name: Copy Version Documentation Files
+        run: |
+          # Create folder for current version docs
+          mkdir -p pages-repo/versions/${{ env.VERSION }}
+          
+          # Copy all md files from docs and root README
+          cp main-repo/docs/*.md pages-repo/versions/${{ env.VERSION }}/ || true
+          cp main-repo/README.md pages-repo/versions/${{ env.VERSION }}/README.md || true
+
+      - name: Update Version Selector Registry
+        run: |
+          # Use Python to parse/update versions/list.json
+          python - <<EOF
+          import os
+          import json
+
+          version = "${{ env.VERSION }}"
+          list_dir = "pages-repo/versions"
+          os.makedirs(list_dir, exist_ok=True)
+          list_path = os.path.join(list_dir, "list.json")
+
+          versions = []
+          if os.path.exists(list_path):
+              try:
+                  with open(list_path, "r") as f:
+                      versions = json.load(f)
+              except Exception:
+                  pass
+
+          if version not in versions:
+              versions.insert(0, version) # Prepended so latest is always default
+
+          # Deduplicate and sort appropriately (semver sort or keep original order)
+          # For simplicity, keep unique list with latest prepended
+          unique_versions = []
+          for v in versions:
+              if v not in unique_versions:
+                  unique_versions.append(v)
+
+          with open(list_path, "w") as f:
+              json.dump(unique_versions, f, indent=2)
+          print("Updated list.json versions to:", unique_versions)
+          EOF
+
+      - name: Commit and Push Changes to GitHub Pages
+        run: |
+          cd pages-repo
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Set origin if not present (in case of fresh git init)
+          git remote get-url origin || git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          
+          git add -A
+          git commit -m "docs: deploy version ${{ env.VERSION }} documentation website" || echo "No changes to commit"
+          git push origin gh-pages --force
