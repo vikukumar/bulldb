@@ -1,4 +1,4 @@
-module bulldb
+module github.com/vikukumar/bulldb/golang
 
 go 1.25.0
 

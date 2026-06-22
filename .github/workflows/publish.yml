@@ -87,6 +87,19 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Pack NPM Package
+        run: |
+          cd typescript
+          npm pack
+          mkdir -p ../npm-out
+          mv *.tgz ../npm-out/
+
+      - name: Upload NPM Package Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: npm-artifact
+          path: npm-out/
+
   # 2. Publish Python package to PyPI
   publish-pypi:
     runs-on: ubuntu-latest
@@ -126,6 +139,12 @@ jobs:
           packages-dir: python/dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
+
+      - name: Upload PyPI Package Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: pypi-artifact
+          path: python/dist/
 
   # 3. Publish C# package to NuGet
   publish-nuget:
@@ -179,7 +198,14 @@ jobs:
 
       - name: Publish Package to GitHub Packages (NuGet)
         run: |
-          dotnet nuget push out/*.nupkg --api-key "${{ secrets.GITHUB_TOKEN }}" --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --skip-duplicate || echo "GitHub NuGet push failed (might already exist)."
+          dotnet nuget add source --username "${{ github.repository_owner }}" --password "${{ secrets.GITHUB_TOKEN }}" --store-password-in-clear-text --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" || true
+          dotnet nuget push out/*.nupkg --api-key "${{ secrets.GITHUB_TOKEN }}" --source github --skip-duplicate || echo "GitHub NuGet push failed (might already exist)."
+
+      - name: Upload NuGet Package Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: nuget-artifact
+          path: out/
 
   # 4. Publish Rust package to Crates.io
   publish-crates-io:
@@ -207,6 +233,19 @@ jobs:
         run: |
           cd rust/bulldb
           cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty || echo "Warning: Failed to publish to Crates.io. This could be due to a duplicate version or an unverified email address on crates.io."
+
+      - name: Pack Cargo Package
+        run: |
+          cd rust/bulldb
+          cargo package --allow-dirty
+          mkdir -p ../../cargo-out
+          cp target/package/*.crate ../../cargo-out/
+
+      - name: Upload Cargo Package Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: cargo-artifact
+          path: cargo-out/
 
   # 5. Push Git tag for Go package compatibility
   publish-go-tag:
@@ -241,3 +280,65 @@ jobs:
           if ! git push origin "$TAG_NAME"; then
             echo "WARNING: Failed to push git tag. Please ensure that 'Workflow permissions' in your repository Settings -> Actions -> General is set to 'Read and write permissions', or provide a valid 'PERSONAL_ACCESS_TOKEN' secret with write access."
           fi
+
+  # 6. Create Git Release and Upload Package Files
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [publish-npm, publish-pypi, publish-nuget, publish-crates-io, publish-go-tag]
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Read Current Version
+        id: get_version
+        run: |
+          VERSION=$(jq -r '.version' version.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Create Release Directory
+        run: mkdir release-assets
+
+      - name: Download NPM Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: npm-artifact
+          path: release-assets
+        continue-on-error: true
+
+      - name: Download PyPI Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: pypi-artifact
+          path: release-assets
+        continue-on-error: true
+
+      - name: Download NuGet Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: nuget-artifact
+          path: release-assets
+        continue-on-error: true
+
+      - name: Download Cargo Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: cargo-artifact
+          path: release-assets
+        continue-on-error: true
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v${{ env.VERSION }}"
+          
+          # Delete existing release/tag locally and on remote if it already exists (to support re-runs / overwrites)
+          gh release delete "$TAG_NAME" -y || true
+          git tag -d "$TAG_NAME" || true
+          git push origin :refs/tags/"$TAG_NAME" || true
+          
+          # Create new release and upload all assets
+          gh release create "$TAG_NAME" \
+            release-assets/* \
+            --title "Release $TAG_NAME" \
+            --notes "BullDB multi-language SDK release package files for version ${{ env.VERSION }}. Includes package builds for NPM, PyPI, NuGet, and Crates.io."
