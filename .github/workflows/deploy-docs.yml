@@ -104,4 +104,5 @@ jobs:
           
           git add -A
           git commit -m "docs: deploy version ${{ env.VERSION }} documentation website" || echo "No changes to commit"
+          git checkout -B gh-pages
           git push origin gh-pages --force

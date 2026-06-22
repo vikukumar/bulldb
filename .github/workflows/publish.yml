@@ -25,8 +25,9 @@ on:
 jobs:
   # 1. Publish TypeScript/Node package to NPM
   publish-npm:
-    if: ${{ secrets.NPM_TOKEN != '' }}
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v3
@@ -48,6 +49,7 @@ jobs:
           npm run build
 
       - name: Publish Package to NPM
+        if: ${{ env.NPM_TOKEN != '' }}
         run: |
           cd typescript
           npm publish --access public
@@ -56,8 +58,9 @@ jobs:
 
   # 2. Publish Python package to PyPI
   publish-pypi:
-    if: ${{ secrets.PYPI_API_TOKEN != '' }}
     runs-on: ubuntu-latest
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v3
@@ -78,6 +81,7 @@ jobs:
           python -m build
 
       - name: Publish Package to PyPI
+        if: ${{ env.PYPI_API_TOKEN != '' }}
         run: |
           cd python
           twine upload dist/*
@@ -87,8 +91,9 @@ jobs:
 
   # 3. Publish C# package to NuGet
   publish-nuget:
-    if: ${{ secrets.NUGET_API_KEY != '' }}
     runs-on: ubuntu-latest
+    env:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v3
@@ -106,13 +111,15 @@ jobs:
           dotnet pack csharp/BullDB/BullDB.csproj -c Release -o out
 
       - name: Publish Package to NuGet
+        if: ${{ env.NUGET_API_KEY != '' }}
         run: |
           dotnet nuget push out/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   # 4. Publish Rust package to Crates.io
   publish-crates-io:
-    if: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
     runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v3
@@ -126,6 +133,7 @@ jobs:
           cargo package
 
       - name: Publish Package to Crates.io
+        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
         run: |
           cd rust/bulldb
           cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

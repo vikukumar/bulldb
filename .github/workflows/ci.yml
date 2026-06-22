@@ -27,7 +27,7 @@ jobs:
       - name: Run pytest
         run: |
           cd python
-          pytest
+          python -m pytest
 
   typescript-tests:
     runs-on: ubuntu-latest
