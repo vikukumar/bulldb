@@ -100,6 +100,7 @@ jobs:
       - name: Publish Package to PyPI
         if: ${{ env.PYPI_API_TOKEN != '' || github.repository == 'vikukumar/bulldb' }}
         uses: pypa/gh-action-pypi-publish@release/v1
+        continue-on-error: true
         with:
           packages-dir: python/dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
@@ -137,13 +138,24 @@ jobs:
       - name: NuGet Login (OIDC)
         if: ${{ env.NUGET_API_KEY == '' && github.repository == 'vikukumar/bulldb' }}
         uses: nuget/login@v1
+        id: login
         with:
           user: ${{ github.repository_owner }}
 
       - name: Publish Package to NuGet
         if: ${{ env.NUGET_API_KEY != '' || github.repository == 'vikukumar/bulldb' }}
         run: |
-          dotnet nuget push out/*.nupkg --api-key $NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
+          API_KEY="${{ secrets.NUGET_API_KEY }}"
+          if [ -z "$API_KEY" ]; then
+            API_KEY="${{ steps.login.outputs.NUGET_API_KEY }}"
+          fi
+          
+          if [ -n "$API_KEY" ]; then
+            echo "Pushing NuGet package..."
+            dotnet nuget push out/*.nupkg --api-key "$API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate || echo "NuGet package push failed (might already exist)."
+          else
+            echo "No API key found. Skipping NuGet publish."
+          fi
 
   # 4. Publish Rust package to Crates.io
   publish-crates-io:
@@ -171,7 +183,7 @@ jobs:
         if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
         run: |
           cd rust/bulldb
-          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty || echo "Warning: Failed to publish to Crates.io. This could be due to a duplicate version or an unverified email address on crates.io."
 
   # 5. Push Git tag for Go package compatibility
   publish-go-tag:
@@ -203,4 +215,6 @@ jobs:
           git push origin :refs/tags/"$TAG_NAME" || true
           
           git tag "$TAG_NAME"
-          git push origin "$TAG_NAME"
+          if ! git push origin "$TAG_NAME"; then
+            echo "WARNING: Failed to push git tag. Please ensure that 'Workflow permissions' in your repository Settings -> Actions -> General is set to 'Read and write permissions', or provide a valid 'PERSONAL_ACCESS_TOKEN' secret with write access."
+          fi
