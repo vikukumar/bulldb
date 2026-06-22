@@ -19,22 +19,26 @@ def main():
             pass
 
     if build_number:
-        version_py = f"{base_version}.post{build_number}"
-        version_other = f"{base_version}.{build_number}"
+        version_py = f"{base_version}.{build_number}"
+        version_dotnet = f"{base_version}.{build_number}"
+        version_semver = f"{base_version}-{build_number}"
     else:
         version_py = base_version
-        version_other = base_version
+        version_dotnet = base_version
+        version_semver = base_version
 
     print(f"Syncing Python version: {version_py}")
-    print(f"Syncing other packages version: {version_other}")
+    print(f"Syncing C# version: {version_dotnet}")
+    print(f"Syncing SemVer packages version: {version_semver}")
 
     # Write to GITHUB_ENV if in GitHub Actions
     if "GITHUB_ENV" in os.environ:
         with open(os.environ["GITHUB_ENV"], "a") as env_file:
             env_file.write(f"VERSION_PY={version_py}\n")
-            env_file.write(f"VERSION_OTHER={version_other}\n")
-            # Set generic VERSION to VERSION_OTHER
-            env_file.write(f"VERSION={version_other}\n")
+            env_file.write(f"VERSION_DOTNET={version_dotnet}\n")
+            env_file.write(f"VERSION_SEMVER={version_semver}\n")
+            # Set generic VERSION to VERSION_SEMVER (used for tags and releases)
+            env_file.write(f"VERSION={version_semver}\n")
 
     # 1. Update Python
     # python/pyproject.toml: version = "..."
@@ -53,7 +57,7 @@ def main():
     if os.path.exists(package_json_path):
         with open(package_json_path, "r") as f:
             pkg = json.load(f)
-        pkg["version"] = version_other
+        pkg["version"] = version_semver
         with open(package_json_path, "w") as f:
             json.dump(pkg, f, indent=2)
             f.write("\n")
@@ -65,7 +69,7 @@ def main():
     if os.path.exists(cargo_path):
         with open(cargo_path, "r") as f:
             content = f.read()
-        content = re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{version_other}"', content)
+        content = re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{version_semver}"', content)
         with open(cargo_path, "w") as f:
             f.write(content)
         print("Updated rust/bulldb/Cargo.toml")
@@ -77,10 +81,10 @@ def main():
         with open(csproj_path, "r") as f:
             content = f.read()
         if "<Version>" in content:
-            content = re.sub(r'<Version>[^<]+</Version>', f'<Version>{version_other}</Version>', content)
+            content = re.sub(r'<Version>[^<]+</Version>', f'<Version>{version_dotnet}</Version>', content)
         else:
             # Insert Version tag under PropertyGroup
-            content = re.sub(r'<PropertyGroup>', f'<PropertyGroup>\n    <Version>{version_other}</Version>', content)
+            content = re.sub(r'<PropertyGroup>', f'<PropertyGroup>\n    <Version>{version_dotnet}</Version>', content)
         with open(csproj_path, "w") as f:
             f.write(content)
         print("Updated csharp/BullDB/BullDB.csproj")
@@ -90,7 +94,7 @@ def main():
     go_version_path = "golang/bulldb/version.go"
     os.makedirs(os.path.dirname(go_version_path), exist_ok=True)
     with open(go_version_path, "w") as f:
-        f.write(f'package bulldb\n\nconst Version = "{version_other}"\n')
+        f.write(f'package bulldb\n\nconst Version = "{version_semver}"\n')
     print("Updated golang/bulldb/version.go")
 
     # Copy LICENSE.md to all subdirectories to ensure it is always present during builds
