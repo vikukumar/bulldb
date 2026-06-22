@@ -37,6 +37,9 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v3
 
+      - name: Sync Versions with Build Number
+        run: python sync_versions.py --build-number ${{ github.run_number }}
+
       - name: Copy LICENSE
         run: |
           cp LICENSE.md typescript/
@@ -112,6 +115,9 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v3
 
+      - name: Sync Versions with Build Number
+        run: python sync_versions.py --build-number ${{ github.run_number }}
+
       - name: Copy LICENSE
         run: |
           cp LICENSE.md python/
@@ -157,6 +163,9 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v3
+
+      - name: Sync Versions with Build Number
+        run: python sync_versions.py --build-number ${{ github.run_number }}
 
       - name: Copy LICENSE
         run: |
@@ -216,6 +225,9 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v3
 
+      - name: Sync Versions with Build Number
+        run: python sync_versions.py --build-number ${{ github.run_number }}
+
       - name: Copy LICENSE
         run: |
           cp LICENSE.md rust/bulldb/
@@ -256,11 +268,8 @@ jobs:
         with:
           token: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Read Current Version
-        id: get_version
-        run: |
-          VERSION=$(jq -r '.version' version.json)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Sync Versions with Build Number
+        run: python sync_versions.py --build-number ${{ github.run_number }}
 
       - name: Configure Git Author
         run: |
@@ -289,11 +298,8 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v3
 
-      - name: Read Current Version
-        id: get_version
-        run: |
-          VERSION=$(jq -r '.version' version.json)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Sync Versions with Build Number
+        run: python sync_versions.py --build-number ${{ github.run_number }}
 
       - name: Create Release Directory
         run: mkdir release-assets
