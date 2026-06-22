@@ -16,7 +16,6 @@ authors = [
 keywords = ["orm", "odm", "database", "sql", "nosql", "vector", "graph", "rag"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
