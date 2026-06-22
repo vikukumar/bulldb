@@ -75,7 +75,7 @@ SecurityEngine.set_encryption_key(b"my-custom-super-secret-key-32b-length")
 
 #### TypeScript
 ```typescript
-import { SecurityEngine } from "bulldb";
+import { SecurityEngine } from "@vikukumar/bulldb";
 
 // Runtime key override
 SecurityEngine.setEncryptionKey(Buffer.from("my-custom-super-secret-key-32b-length"));
