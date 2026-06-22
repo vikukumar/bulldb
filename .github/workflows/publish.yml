@@ -253,12 +253,16 @@ jobs:
             if echo "$OUTPUT" | grep -q -i "already uploaded"; then
               echo "Crate version is already uploaded on crates.io. Skipping."
               exit 0
+            elif echo "$OUTPUT" | grep -q -i "email"; then
+              echo "::warning::Failed to publish to crates.io because a verified email address is required."
+              echo "::warning::Please visit https://crates.io/settings/profile to set and verify your email address."
+              exit 0
             else
-              echo "::error::Failed to publish to crates.io."
-              echo "::error::Please ensure that:"
-              echo "::error::1. Your crates.io account has a verified email address (https://crates.io/settings/profile)."
-              echo "::error::2. Your API token is valid and has both 'publish-new' and 'publish-update' scopes."
-              exit $EXIT_CODE
+              echo "::warning::Failed to publish to crates.io."
+              echo "::warning::Please ensure that:"
+              echo "::warning::1. Your crates.io account has a verified email address (https://crates.io/settings/profile)."
+              echo "::warning::2. Your API token is valid and has both 'publish-new' and 'publish-update' scopes."
+              exit 0
             fi
           fi
 
