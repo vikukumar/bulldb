@@ -110,7 +110,8 @@ def main():
         "python",
         "rust/bulldb",
         "csharp/BullDB",
-        "golang"
+        "golang",
+        "golang/bulldb"
     ]
     for sp in subprojects:
         if os.path.exists(sp):
