@@ -176,3 +176,29 @@ describe("TypeScript Universal Model Active Record Suite", () => {
     expect(rows[0].indexedCol).toBe("IndexMe TS");
   });
 });
+
+describe("TypeScript SQLite Auto-Creation", () => {
+  it("should create directory and file automatically on connect", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+    const { MultiDatabase } = require("../src/database");
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulldb-ts-test-"));
+    const dbFile = path.join(tmpDir, "nested", "subdir", "test.db");
+    const dbUrl = `sqlite://${dbFile}`;
+
+    const testDb = new MultiDatabase();
+    testDb.registerDatabase("sqlite_file", dbUrl);
+    const driver = testDb.drivers.get("sqlite_file");
+
+    await driver!.connect();
+
+    expect(fs.existsSync(dbFile)).toBe(true);
+    expect(fs.existsSync(path.dirname(dbFile))).toBe(true);
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+});
+

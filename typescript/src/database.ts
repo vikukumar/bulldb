@@ -1,4 +1,6 @@
 import * as url from "url";
+import * as fs from "fs";
+import * as path from "path";
 
 export class CircuitBreakerOpenException extends Error {}
 
@@ -78,7 +80,27 @@ export class SQLiteDriver extends DatabaseDriver {
   public mockDb: Record<string, any[]> = {}; // Memory fallback driver inside JS
   private mockSchema = new Map<string, Array<{ name: string; type: string; pk: number }>>();
 
-  async connect(): Promise<void> {}
+  async connect(): Promise<void> {
+    if (this.urlStr.startsWith("sqlite://")) {
+      let cleanPath = this.urlStr.slice(9);
+      if (cleanPath.startsWith("/")) {
+        cleanPath = cleanPath.slice(1);
+      }
+      const qIdx = cleanPath.indexOf("?");
+      if (qIdx !== -1) {
+        cleanPath = cleanPath.slice(0, qIdx);
+      }
+      if (cleanPath !== ":memory:" && cleanPath !== "") {
+        const dir = path.dirname(path.resolve(cleanPath));
+        if (dir && !fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        if (!fs.existsSync(cleanPath)) {
+          fs.writeFileSync(cleanPath, "");
+        }
+      }
+    }
+  }
   async disconnect(): Promise<void> {}
   async ping(): Promise<boolean> { return true; }
 

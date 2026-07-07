@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -84,6 +86,7 @@ type SQLiteDriver struct {
 	URL            string
 	db             *sql.DB
 	circuitBreaker *CircuitBreaker
+	mu             sync.Mutex
 }
 
 func NewSQLiteDriver(name, dsn string) *SQLiteDriver {
@@ -97,26 +100,23 @@ func NewSQLiteDriver(name, dsn string) *SQLiteDriver {
 func (d *SQLiteDriver) GetName() string { return d.Name }
 
 func (d *SQLiteDriver) Connect(ctx context.Context) error {
-	dsn := strings.TrimPrefix(d.URL, "sqlite://")
-	if dsn == ":memory:" || dsn == "" {
-		dsn = "file::memory:?cache=shared"
-	}
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return err
-	}
-	d.db = db
-	return nil
+	return d.EnsureConnected(ctx)
 }
 
 func (d *SQLiteDriver) Disconnect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.db != nil {
-		return d.db.Close()
+		err := d.db.Close()
+		d.db = nil
+		return err
 	}
 	return nil
 }
 
 func (d *SQLiteDriver) Ping(ctx context.Context) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.db == nil {
 		return false
 	}
@@ -124,9 +124,42 @@ func (d *SQLiteDriver) Ping(ctx context.Context) bool {
 }
 
 func (d *SQLiteDriver) EnsureConnected(ctx context.Context) error {
-	if !d.Ping(ctx) {
-		return d.Connect(ctx)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.db != nil {
+		if d.db.PingContext(ctx) == nil {
+			return nil
+		}
+		_ = d.db.Close()
+		d.db = nil
 	}
+
+	dsn := strings.TrimPrefix(d.URL, "sqlite://")
+	if dsn == ":memory:" || dsn == "" {
+		dsn = "file::memory:?cache=shared"
+	} else {
+		cleanPath := dsn
+		if idx := strings.Index(cleanPath, "?"); idx != -1 {
+			cleanPath = cleanPath[:idx]
+		}
+		cleanPath = strings.TrimPrefix(cleanPath, "file:")
+		
+		dir := filepath.Dir(cleanPath)
+		if dir != "." && dir != "/" && dir != "" {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("failed to create sqlite directories: %w", err)
+			}
+		}
+		f, err := os.OpenFile(cleanPath, os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			f.Close()
+		}
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return err
+	}
+	d.db = db
 	return nil
 }
 
@@ -351,6 +384,68 @@ func (mdb *MultiDatabase) Write(ctx context.Context, table string, payload map[s
 	driver := mdb.GetRoute(table, true)
 	if err := driver.EnsureConnected(ctx); err != nil {
 		return nil, err
+	}
+
+	sqliteDriver, isSqlite := driver.(*SQLiteDriver)
+	if isSqlite {
+		sqliteDriver.mu.Lock()
+		defer sqliteDriver.mu.Unlock()
+
+		tx, err := sqliteDriver.db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+
+		if upsert {
+			pkVal, ok := payload["id"]
+			if ok && pkVal != nil {
+				sqlQuery := fmt.Sprintf("SELECT id FROM %s WHERE id = ?", table)
+				rows, err := tx.QueryContext(ctx, sqlQuery, pkVal)
+				if err == nil {
+					hasRow := rows.Next()
+					rows.Close()
+					if hasRow {
+						setClauses := make([]string, 0, len(payload))
+						args := make([]interface{}, 0, len(payload))
+						for k, v := range payload {
+							if k != "id" {
+								setClauses = append(setClauses, fmt.Sprintf("%s = ?", k))
+								args = append(args, v)
+							}
+						}
+						args = append(args, pkVal)
+						updateQuery := fmt.Sprintf("UPDATE %s SET %s WHERE id = ?", table, strings.Join(setClauses, ", "))
+						_, err = tx.ExecContext(ctx, updateQuery, args...)
+						if err != nil {
+							return nil, err
+						}
+						if err := tx.Commit(); err != nil {
+							return nil, err
+						}
+						return payload, nil
+					}
+				}
+			}
+		}
+
+		keys := make([]string, 0, len(payload))
+		values := make([]interface{}, 0, len(payload))
+		placeholders := make([]string, 0, len(payload))
+		for k, v := range payload {
+			keys = append(keys, k)
+			values = append(values, v)
+			placeholders = append(placeholders, "?")
+		}
+		insertQuery := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(keys, ", "), strings.Join(placeholders, ", "))
+		_, err = tx.ExecContext(ctx, insertQuery, values...)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return payload, nil
 	}
 
 	if upsert {

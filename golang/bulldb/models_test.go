@@ -2,6 +2,7 @@ package bulldb
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,5 +224,65 @@ func TestGoPerformanceCacheAndTelemetry(t *testing.T) {
 	telemetry.IncrementMetric("cache_hit")
 	if telemetry.GetMetric("cache_hit") != 1 {
 		t.Errorf("telemetry increment failed")
+	}
+}
+
+func TestGoSqliteAutoCreationAndConcurrency(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "bulldb-go-test-")
+	if err != nil {
+		t.Fatalf("failed temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbFile := filepath.Join(tmpDir, "nested", "subdir", "test.db")
+	dbURL := "sqlite://" + dbFile
+
+	db := NewMultiDatabase()
+	db.RegisterDatabase("sqlite_file", dbURL)
+	db.PrimaryName = "sqlite_file"
+
+	driver := db.Drivers["sqlite_file"]
+	err = driver.Connect(ctx)
+	if err != nil {
+		t.Fatalf("failed connect: %v", err)
+	}
+
+	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+		t.Errorf("expected sqlite database file to be created, but it was not")
+	}
+
+	_, err = driver.Execute(ctx, "CREATE TABLE IF NOT EXISTS concurrency_test (id TEXT PRIMARY KEY, val TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	const workerCount = 50
+	done := make(chan bool, workerCount)
+
+	for i := 0; i < workerCount; i++ {
+		go func(workerID int) {
+			payload := map[string]interface{}{
+				"id":  fmt.Sprintf("id_%d", workerID),
+				"val": fmt.Sprintf("val_%d", workerID),
+			}
+			_, err := db.Write(ctx, "concurrency_test", payload, true)
+			if err != nil {
+				t.Errorf("write failed: %v", err)
+			}
+			done <- true
+		}(i)
+	}
+
+	for i := 0; i < workerCount; i++ {
+		<-done
+	}
+
+	countRows, err := driver.Execute(ctx, "SELECT * FROM concurrency_test")
+	if err != nil {
+		t.Fatalf("select all failed: %v", err)
+	}
+	if len(countRows) != workerCount {
+		t.Errorf("expected %d rows, got %d", workerCount, len(countRows))
 	}
 }

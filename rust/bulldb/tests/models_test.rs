@@ -163,3 +163,31 @@ fn test_rust_performance_and_telemetry() {
     observability::increment_metric("rust_tests_run");
     assert_eq!(observability::get_metric("rust_tests_run"), 1);
 }
+
+#[test]
+fn test_rust_sqlite_auto_creation() {
+    use std::time::SystemTime;
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let path = std::env::temp_dir().join(format!("bulldb_rust_test_{}", now));
+    let db_file = path.join("nested").join("subdir").join("test.db");
+    let db_url = format!("sqlite://{}", db_file.to_str().unwrap());
+
+    let mdb = MultiDatabase::new();
+    mdb.drivers.lock().unwrap().insert(
+        "sqlite_file".to_string(),
+        Box::new(bulldb::SQLiteMockDriver::new(
+            "sqlite_file".to_string(),
+            db_url,
+        )),
+    );
+
+    let mut m = mdb.drivers.lock().unwrap();
+    let driver = m.get_mut("sqlite_file").unwrap();
+    driver.connect().unwrap();
+
+    assert!(db_file.exists());
+    assert!(db_file.parent().unwrap().exists());
+
+    let _ = std::fs::remove_dir_all(path);
+}
+

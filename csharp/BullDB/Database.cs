@@ -70,6 +70,7 @@ namespace BullDB
         public string Name { get; }
         private readonly string _dsn;
         private readonly CircuitBreaker _cb = new CircuitBreaker(5, TimeSpan.FromSeconds(10));
+        private readonly object _lock = new object();
         public Dictionary<string, List<Dictionary<string, object>>> MockDb = new Dictionary<string, List<Dictionary<string, object>>>();
 
         public SQLiteMockDriver(string name, string dsn)
@@ -78,125 +79,170 @@ namespace BullDB
             _dsn = dsn;
         }
 
-        public Task ConnectAsync() => Task.CompletedTask;
+        public Task ConnectAsync()
+        {
+            lock (_lock)
+            {
+                if (_dsn != null && _dsn.StartsWith("sqlite://"))
+                {
+                    var cleanPath = _dsn.Substring(9);
+                    if (cleanPath.StartsWith("/"))
+                    {
+                        cleanPath = cleanPath.Substring(1);
+                    }
+                    int qIdx = cleanPath.IndexOf('?');
+                    if (qIdx != -1)
+                    {
+                        cleanPath = cleanPath.Substring(0, qIdx);
+                    }
+                    if (cleanPath != ":memory:" && !string.IsNullOrEmpty(cleanPath))
+                    {
+                        var fullPath = System.IO.Path.GetFullPath(cleanPath);
+                        var dir = System.IO.Path.GetDirectoryName(fullPath);
+                        if (dir != null && !System.IO.Directory.Exists(dir))
+                        {
+                            System.IO.Directory.CreateDirectory(dir);
+                        }
+                        if (!System.IO.File.Exists(fullPath))
+                        {
+                            System.IO.File.Create(fullPath).Dispose();
+                        }
+                    }
+                }
+            }
+            return Task.CompletedTask;
+        }
+
         public Task DisconnectAsync() => Task.CompletedTask;
         public Task<bool> PingAsync() => Task.FromResult(true);
         public Task EnsureConnectedAsync() => Task.CompletedTask;
 
         public Task<List<Dictionary<string, object>>> ExecuteAsync(string query, params object[] args)
         {
-            if (!_cb.AllowRequest()) throw new InvalidOperationException("circuit breaker is OPEN");
-
-            var results = new List<Dictionary<string, object>>();
-
-            if (query.ToUpper().Contains("CREATE TABLE"))
+            lock (_lock)
             {
-                var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 3)
+                if (!_cb.AllowRequest()) throw new InvalidOperationException("circuit breaker is OPEN");
+
+                var results = new List<Dictionary<string, object>>();
+
+                if (query.ToUpper().Contains("CREATE TABLE"))
                 {
-                    var table = parts[2].Trim('(', ')', ',');
-                    if (!MockDb.ContainsKey(table))
+                    var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 3)
                     {
-                        MockDb[table] = new List<Dictionary<string, object>>();
+                        var table = parts[2].Trim('(', ')', ',');
+                        if (!MockDb.ContainsKey(table))
+                        {
+                            MockDb[table] = new List<Dictionary<string, object>>();
+                        }
+                    }
+                    _cb.RecordSuccess();
+                    return Task.FromResult(results);
+                }
+
+                if (query.Contains("sqlite_master"))
+                {
+                    foreach (var table in MockDb.Keys)
+                    {
+                        results.Add(new Dictionary<string, object> { { "name", table } });
+                    }
+                    _cb.RecordSuccess();
+                    return Task.FromResult(results);
+                }
+
+                if (query.Contains("PRAGMA table_info"))
+                {
+                    var parts = query.Split('(', ')');
+                    if (parts.Length >= 2)
+                    {
+                        var table = parts[1].Trim();
+                        if (table == "users")
+                        {
+                            results.Add(new Dictionary<string, object> { { "name", "id" }, { "type", "TEXT" }, { "pk", 1 } });
+                            results.Add(new Dictionary<string, object> { { "name", "email" }, { "type", "TEXT" }, { "pk", 0 } });
+                            results.Add(new Dictionary<string, object> { { "name", "secret_note" }, { "type", "BLOB" }, { "pk", 0 } });
+                            results.Add(new Dictionary<string, object> { { "name", "password" }, { "type", "TEXT" }, { "pk", 0 } });
+                        }
+                    }
+                    _cb.RecordSuccess();
+                    return Task.FromResult(results);
+                }
+
+                if (query.ToUpper().StartsWith("SELECT"))
+                {
+                    var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 4)
+                    {
+                        var table = parts[3];
+                        if (MockDb.ContainsKey(table))
+                        {
+                            _cb.RecordSuccess();
+                            return Task.FromResult(new List<Dictionary<string, object>>(MockDb[table]));
+                        }
                     }
                 }
+
                 _cb.RecordSuccess();
                 return Task.FromResult(results);
             }
-
-            if (query.Contains("sqlite_master"))
-            {
-                foreach (var table in MockDb.Keys)
-                {
-                    results.Add(new Dictionary<string, object> { { "name", table } });
-                }
-                _cb.RecordSuccess();
-                return Task.FromResult(results);
-            }
-
-            if (query.Contains("PRAGMA table_info"))
-            {
-                var parts = query.Split('(', ')');
-                if (parts.Length >= 2)
-                {
-                    var table = parts[1].Trim();
-                    if (table == "users")
-                    {
-                        results.Add(new Dictionary<string, object> { { "name", "id" }, { "type", "TEXT" }, { "pk", 1 } });
-                        results.Add(new Dictionary<string, object> { { "name", "email" }, { "type", "TEXT" }, { "pk", 0 } });
-                        results.Add(new Dictionary<string, object> { { "name", "secret_note" }, { "type", "BLOB" }, { "pk", 0 } });
-                        results.Add(new Dictionary<string, object> { { "name", "password" }, { "type", "TEXT" }, { "pk", 0 } });
-                    }
-                }
-                _cb.RecordSuccess();
-                return Task.FromResult(results);
-            }
-
-            if (query.ToUpper().StartsWith("SELECT"))
-            {
-                var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 4)
-                {
-                    var table = parts[3];
-                    if (MockDb.ContainsKey(table))
-                    {
-                        _cb.RecordSuccess();
-                        return Task.FromResult(new List<Dictionary<string, object>>(MockDb[table]));
-                    }
-                }
-            }
-
-            _cb.RecordSuccess();
-            return Task.FromResult(results);
         }
 
         public Task<Dictionary<string, object>> InsertAsync(string table, Dictionary<string, object> payload)
         {
-            if (!MockDb.ContainsKey(table)) MockDb[table] = new List<Dictionary<string, object>>();
-            MockDb[table].Add(payload);
-            return Task.FromResult(payload);
+            lock (_lock)
+            {
+                if (!MockDb.ContainsKey(table)) MockDb[table] = new List<Dictionary<string, object>>();
+                MockDb[table].Add(payload);
+                return Task.FromResult(payload);
+            }
         }
 
         public Task<Dictionary<string, object>> UpdateAsync(string table, Dictionary<string, object> payload, Dictionary<string, object> filters)
         {
-            if (!MockDb.ContainsKey(table)) return Task.FromResult(payload);
-            foreach (var row in MockDb[table])
+            lock (_lock)
             {
-                bool match = true;
-                foreach (var filter in filters)
+                if (!MockDb.ContainsKey(table)) return Task.FromResult(payload);
+                foreach (var row in MockDb[table])
                 {
-                    if (!row.ContainsKey(filter.Key) || !row[filter.Key].Equals(filter.Value))
+                    bool match = true;
+                    foreach (var filter in filters)
                     {
-                        match = false;
-                        break;
+                        if (!row.ContainsKey(filter.Key) || !row[filter.Key].Equals(filter.Value))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match)
+                    {
+                        foreach (var pair in payload) row[pair.Key] = pair.Value;
                     }
                 }
-                if (match)
-                {
-                    foreach (var pair in payload) row[pair.Key] = pair.Value;
-                }
+                return Task.FromResult(payload);
             }
-            return Task.FromResult(payload);
         }
 
         public Task<bool> DeleteAsync(string table, Dictionary<string, object> filters)
         {
-            if (!MockDb.ContainsKey(table)) return Task.FromResult(false);
-            int initialCount = MockDb[table].Count;
-            MockDb[table].RemoveAll(row =>
+            lock (_lock)
             {
-                bool match = true;
-                foreach (var filter in filters)
+                if (!MockDb.ContainsKey(table)) return Task.FromResult(false);
+                int initialCount = MockDb[table].Count;
+                MockDb[table].RemoveAll(row =>
                 {
-                    if (!row.ContainsKey(filter.Key) || !row[filter.Key].Equals(filter.Value))
+                    bool match = true;
+                    foreach (var filter in filters)
                     {
-                        match = false;
-                        break;
+                        if (!row.ContainsKey(filter.Key) || !row[filter.Key].Equals(filter.Value))
+                        {
+                            match = false;
+                            break;
+                        }
                     }
-                }
-                return match;
-            });
-            return Task.FromResult(MockDb[table].Count < initialCount);
+                    return match;
+                });
+                return Task.FromResult(MockDb[table].Count < initialCount);
+            }
         }
     }
 

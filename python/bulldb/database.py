@@ -93,10 +93,39 @@ class DatabaseDriver:
         return []
 
 class SQLiteDriver(DatabaseDriver):
+    def __init__(self, name: str, url: str):
+        super().__init__(name, url)
+        self._lock = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
     async def connect(self):
-        # In-memory or file-based sqlite3
+        async with self.lock:
+            await self._connect()
+
+    async def _connect(self):
         import sqlite3
-        db_path = self.parsed_url.path.strip("/") or ":memory:"
+        db_path = self.parsed_url.path
+        if self.url.startswith("sqlite://"):
+            db_path = self.url[9:]
+            if db_path.startswith("/"):
+                db_path = db_path[1:]
+            if "?" in db_path:
+                db_path = db_path.split("?")[0]
+        
+        db_path = db_path or ":memory:"
+
+        if db_path != ":memory:":
+            db_dir = os.path.dirname(os.path.abspath(db_path))
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+            with open(db_path, "a"):
+                pass
+
         if hasattr(self, "conn") and self.conn:
             try:
                 self.conn.close()
@@ -107,6 +136,10 @@ class SQLiteDriver(DatabaseDriver):
         self.cursor = self.conn.cursor()
 
     async def disconnect(self):
+        async with self.lock:
+            await self._disconnect()
+
+    async def _disconnect(self):
         if hasattr(self, "conn") and self.conn:
             try:
                 self.conn.close()
@@ -114,6 +147,10 @@ class SQLiteDriver(DatabaseDriver):
                 pass
 
     async def ping(self) -> bool:
+        async with self.lock:
+            return await self._ping()
+
+    async def _ping(self) -> bool:
         try:
             if not hasattr(self, "cursor") or self.cursor is None:
                 return False
@@ -122,18 +159,33 @@ class SQLiteDriver(DatabaseDriver):
         except Exception:
             return False
 
+    async def ensure_connected(self):
+        async with self.lock:
+            await self._ensure_connected()
+
+    async def _ensure_connected(self):
+        try:
+            if not await self._ping():
+                await self._connect()
+        except Exception:
+            await self._connect()
+
     async def execute(self, query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
         if not self.circuit_breaker.allow_request():
             raise CircuitBreakerOpenException(f"Database driver {self.name} circuit is OPEN")
-        try:
-            self.cursor.execute(query, params or ())
-            self.conn.commit()
-            rows = self.cursor.fetchall()
-            self.circuit_breaker.record_success()
-            return [dict(row) for row in rows]
-        except Exception as e:
-            self.circuit_breaker.record_failure()
-            raise e
+        async with self.lock:
+            await self._ensure_connected()
+            try:
+                self.cursor.execute(query, params or ())
+                is_write = any(query.strip().upper().startswith(kw) for kw in ["INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "REPLACE"])
+                if is_write:
+                    self.conn.commit()
+                rows = self.cursor.fetchall()
+                self.circuit_breaker.record_success()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                self.circuit_breaker.record_failure()
+                raise e
 
     async def insert(self, table: str, payload: Dict[str, Any]) -> Any:
         keys = list(payload.keys())
@@ -280,18 +332,47 @@ class MultiDatabase:
     async def write(self, table: str, payload: Dict[str, Any], upsert: bool = False) -> Any:
         driver = self.get_route(table, is_write=True)
         await driver.ensure_connected()
-        if upsert:
-            pk_field = "id"
-            pk_val = payload.get(pk_field)
-            if pk_val:
-                # check existence
-                check_query = f"SELECT {pk_field} FROM {table} WHERE {pk_field} = ?"
-                exists = await driver.execute(check_query, (pk_val,))
-                if exists:
-                    filters = {pk_field: pk_val}
-                    payload_no_pk = {k: v for k, v in payload.items() if k != pk_field}
-                    return await driver.update(table, payload_no_pk, filters)
-        return await driver.insert(table, payload)
+        if isinstance(driver, SQLiteDriver):
+            async with driver.lock:
+                await driver._ensure_connected()
+                driver.cursor.execute("BEGIN TRANSACTION")
+                try:
+                    if upsert:
+                        pk_field = "id"
+                        pk_val = payload.get(pk_field)
+                        if pk_val:
+                            check_query = f"SELECT {pk_field} FROM {table} WHERE {pk_field} = ?"
+                            driver.cursor.execute(check_query, (pk_val,))
+                            exists = driver.cursor.fetchone()
+                            if exists:
+                                set_clause = ", ".join([f"{k} = ?" for k in payload.keys() if k != pk_field])
+                                where_clause = f"{pk_field} = ?"
+                                params = tuple([v for k, v in payload.items() if k != pk_field] + [pk_val])
+                                driver.cursor.execute(f"UPDATE {table} SET {set_clause} WHERE {where_clause}", params)
+                                driver.conn.commit()
+                                return payload
+                    keys = list(payload.keys())
+                    values = list(payload.values())
+                    placeholders = ", ".join(["?" for _ in keys])
+                    query = f"INSERT INTO {table} ({', '.join(keys)}) VALUES ({placeholders})"
+                    driver.cursor.execute(query, tuple(values))
+                    driver.conn.commit()
+                    return payload
+                except Exception as e:
+                    driver.conn.rollback()
+                    raise e
+        else:
+            if upsert:
+                pk_field = "id"
+                pk_val = payload.get(pk_field)
+                if pk_val:
+                    check_query = f"SELECT {pk_field} FROM {table} WHERE {pk_field} = ?"
+                    exists = await driver.execute(check_query, (pk_val,))
+                    if exists:
+                        filters = {pk_field: pk_val}
+                        payload_no_pk = {k: v for k, v in payload.items() if k != pk_field}
+                        return await driver.update(table, payload_no_pk, filters)
+            return await driver.insert(table, payload)
 
     async def delete(self, table: str, filters: Dict[str, Any]) -> Any:
         driver = self.get_route(table, is_write=True)

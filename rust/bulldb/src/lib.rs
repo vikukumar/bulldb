@@ -166,7 +166,33 @@ impl SQLiteMockDriver {
 
 impl DatabaseDriver for SQLiteMockDriver {
     fn get_name(&self) -> String { self.name.clone() }
-    fn connect(&mut self) -> Result<(), String> { Ok(()) }
+    fn connect(&mut self) -> Result<(), String> {
+        if self.url.starts_with("sqlite://") {
+            let mut clean_path = &self.url[9..];
+            if clean_path.starts_with('/') {
+                clean_path = &clean_path[1..];
+            }
+            if let Some(idx) = clean_path.find('?') {
+                clean_path = &clean_path[..idx];
+            }
+            if clean_path != ":memory:" && !clean_path.is_empty() {
+                let path = std::path::Path::new(clean_path);
+                if let Some(parent) = path.parent() {
+                    if !parent.exists() {
+                        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    }
+                }
+                if !path.exists() {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(path)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        Ok(())
+    }
     fn disconnect(&mut self) -> Result<(), String> { Ok(()) }
     fn ping(&mut self) -> bool { true }
     fn ensure_connected(&mut self) -> Result<(), String> { Ok(()) }

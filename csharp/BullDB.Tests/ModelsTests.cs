@@ -153,5 +153,29 @@ namespace BullDB.Tests
             telemetry.IncrementMetric("cs_tests_run");
             Assert.Equal(1, telemetry.GetMetric("cs_tests_run"));
         }
+
+        [Fact]
+        public async Task TestSQLiteAutoCreation()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), "bulldb_cs_test_" + Guid.NewGuid().ToString());
+            var dbFile = Path.Combine(tempDir, "nested", "subdir", "test.db");
+            var dbUrl = "sqlite://" + dbFile;
+
+            var db = new MultiDatabase();
+            db.RegisterDatabase("sqlite_file", dbUrl);
+            var driver = db.Drivers["sqlite_file"];
+
+            await driver.ConnectAsync();
+
+            Assert.True(File.Exists(dbFile));
+            Assert.True(Directory.Exists(Path.GetDirectoryName(dbFile)));
+
+            try
+            {
+                Directory.Delete(tempDir, true);
+            }
+            catch {}
+        }
     }
 }
+
