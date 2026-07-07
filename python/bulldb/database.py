@@ -112,6 +112,8 @@ class SQLiteDriver(DatabaseDriver):
         db_path = self.parsed_url.path
         if self.url.startswith("sqlite://"):
             db_path = self.url[9:]
+            if db_path.startswith("/:memory:"):
+                db_path = db_path[1:]
             if db_path.startswith("/"):
                 import platform
                 if len(db_path) > 2 and db_path[2] == ":" and db_path[1].isalpha():

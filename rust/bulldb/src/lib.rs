@@ -223,6 +223,9 @@ impl DatabaseDriver for SQLiteMockDriver {
     fn connect(&mut self) -> Result<(), String> {
         if self.url.starts_with("sqlite://") {
             let mut clean_path = &self.url[9..];
+            if clean_path.starts_with("/:memory:") {
+                clean_path = &clean_path[1..];
+            }
             if clean_path.starts_with('/') {
                 if clean_path.len() > 2 && clean_path.as_bytes()[2] == b':' && clean_path.as_bytes()[1].is_ascii_alphabetic() {
                     clean_path = &clean_path[1..];

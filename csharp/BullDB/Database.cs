@@ -86,6 +86,10 @@ namespace BullDB
                 if (_dsn != null && _dsn.StartsWith("sqlite://"))
                 {
                     var cleanPath = _dsn.Substring(9);
+                    if (cleanPath.StartsWith("/:memory:"))
+                    {
+                        cleanPath = cleanPath.Substring(1);
+                    }
                     if (cleanPath.StartsWith("/"))
                     {
                         if (cleanPath.Length > 2 && cleanPath[2] == ':' && char.IsLetter(cleanPath[1]))

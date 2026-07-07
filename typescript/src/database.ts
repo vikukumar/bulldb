@@ -85,6 +85,9 @@ export class SQLiteDriver extends DatabaseDriver {
     const sqlitePrefix = ["sqlite:", "", ""].join("/");
     if (this.urlStr.startsWith(sqlitePrefix)) {
       let cleanPath = this.urlStr.slice(sqlitePrefix.length);
+      if (cleanPath.startsWith("/:memory:")) {
+        cleanPath = cleanPath.slice(1);
+      }
       if (cleanPath.startsWith("/")) {
         if (/^\/[a-zA-Z]:/.test(cleanPath)) {
           cleanPath = cleanPath.slice(1);
