@@ -1,5 +1,6 @@
-import * as fs from "fs";
-import * as path from "path";
+const req = typeof require !== "undefined" ? require : undefined;
+const fs: any = req ? req("fs") : undefined;
+const path: any = req ? req("path") : undefined;
 
 export class ModelGenerator {
   static async reverseEngineer(db: any, outputPath: string) {

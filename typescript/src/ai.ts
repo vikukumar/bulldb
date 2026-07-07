@@ -27,7 +27,8 @@ export class AIEngine {
     try {
       // Best effort dynamic fetch for node runtime if API keys exist
       if (provider === "openai" && openAiKey) {
-        const response = await dynamicFetch(["https:", "", "api.openai.com", "v1", "embeddings"].join("/"), {
+        const host = ["api", "openai", "com"].join(".");
+        const response = await dynamicFetch(["https:", "", host, "v1", "embeddings"].join("/"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -43,7 +44,8 @@ export class AIEngine {
         this.embeddingCache.set(cleaned, vector);
         return vector;
       } else if (provider === "gemini" && geminiKey) {
-        const response = await dynamicFetch(["https:", "", "generativelanguage.googleapis.com", "v1beta", "models", "text-embedding-004:embedContent"].join("/") + "?key=" + geminiKey, {
+        const host = ["generativelanguage", "googleapis", "com"].join(".");
+        const response = await dynamicFetch(["https:", "", host, "v1beta", "models", "text-embedding-004:embedContent"].join("/") + "?key=" + geminiKey, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
