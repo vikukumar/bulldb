@@ -52,11 +52,11 @@ jobs:
       - name: Copy Version Documentation Files
         run: |
           # Create folder for current version docs
-          mkdir -p pages-repo/versions/${{ env.VERSION }}
+          mkdir -p pages-repo/versions/$VERSION
           
           # Copy all md files from docs and root README
-          cp main-repo/docs/*.md pages-repo/versions/${{ env.VERSION }}/ || true
-          cp main-repo/README.md pages-repo/versions/${{ env.VERSION }}/README.md || true
+          cp main-repo/docs/*.md pages-repo/versions/$VERSION/ || true
+          cp main-repo/README.md pages-repo/versions/$VERSION/README.md || true
 
       - name: Update Version Selector Registry
         run: |
@@ -65,7 +65,7 @@ jobs:
           import os
           import json
 
-          version = "${{ env.VERSION }}"
+          version = os.environ.get("VERSION", "1.0.0")
           list_dir = "pages-repo/versions"
           os.makedirs(list_dir, exist_ok=True)
           list_path = os.path.join(list_dir, "list.json")
@@ -103,6 +103,6 @@ jobs:
           git remote get-url origin || git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           
           git add -A
-          git commit -m "docs: deploy version ${{ env.VERSION }} documentation website" || echo "No changes to commit"
+          git commit -m "docs: deploy version $VERSION documentation website" || echo "No changes to commit"
           git checkout -B gh-pages
           git push origin gh-pages --force

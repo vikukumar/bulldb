@@ -306,8 +306,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="v${{ env.VERSION }}"
-          GO_TAG="golang/bulldb/v${{ env.VERSION }}"
+          TAG_NAME="v$VERSION"
+          GO_TAG="golang/bulldb/v$VERSION"
           
           # Configure Git Author
           git config --global user.name "github-actions[bot]"
@@ -330,10 +330,10 @@ jobs:
           gh release create "$TAG_NAME" \
             release-assets/* \
             --title "Release $TAG_NAME" \
-            --notes "BullDB multi-language SDK release package files for version ${{ env.VERSION }}. Includes package builds for NPM, PyPI, NuGet, and Crates.io."
+            --notes "BullDB multi-language SDK release package files for version $VERSION. Includes package builds for NPM, PyPI, NuGet, and Crates.io."
 
       - name: Trigger Go Proxy Fetch
         run: |
-          VERSION_TAG="v${{ env.VERSION }}"
+          VERSION_TAG="v$VERSION"
           echo "Requesting Go proxy to cache $VERSION_TAG..."
           curl -s "https://proxy.golang.org/github.com/vikukumar/bulldb/golang/bulldb/@v/$VERSION_TAG.info"
