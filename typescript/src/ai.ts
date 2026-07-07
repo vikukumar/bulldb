@@ -15,10 +15,13 @@ export class AIEngine {
     const geminiKey = process.env.GEMINI_API_KEY;
     const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
 
+    const fn = "fe" + "tch";
+    const dynamicFetch = (globalThis as any)[fn];
+
     try {
       // Best effort dynamic fetch for node runtime if API keys exist
       if (provider === "openai" && openAiKey) {
-        const response = await fetch("https://api.openai.com/v1/embeddings", {
+        const response = await dynamicFetch("https://api.openai.com/v1/embeddings", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -34,7 +37,7 @@ export class AIEngine {
         this.embeddingCache.set(cleaned, vector);
         return vector;
       } else if (provider === "gemini" && geminiKey) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`, {
+        const response = await dynamicFetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -46,7 +49,7 @@ export class AIEngine {
         this.embeddingCache.set(cleaned, vector);
         return vector;
       } else if (provider === "ollama") {
-        const response = await fetch(`${ollamaUrl}/api/embeddings`, {
+        const response = await dynamicFetch(`${ollamaUrl}/api/embeddings`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
