@@ -82,9 +82,9 @@ export class SQLiteDriver extends DatabaseDriver {
   private mockSchema = new Map<string, Array<{ name: string; type: string; pk: number }>>();
 
   async connect(): Promise<void> {
-    const sqlitePrefix = ["sqlite:", ""].join("/");
+    const sqlitePrefix = ["sqlite:", "", ""].join("/");
     if (this.urlStr.startsWith(sqlitePrefix)) {
-      let cleanPath = this.urlStr.slice(sqlitePrefix.length + 2);
+      let cleanPath = this.urlStr.slice(sqlitePrefix.length);
       if (cleanPath.startsWith("/")) {
         if (/^\/[a-zA-Z]:/.test(cleanPath)) {
           cleanPath = cleanPath.slice(1);
