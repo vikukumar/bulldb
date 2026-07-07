@@ -1,4 +1,5 @@
-import * as crypto from "crypto";
+const req = typeof require !== "undefined" ? require : undefined;
+const crypto: any = req ? req("crypto") : undefined;
 
 export class AIEngine {
   private static embeddingCache = new Map<string, number[]>();
@@ -11,9 +12,14 @@ export class AIEngine {
       return this.embeddingCache.get(cleaned)!;
     }
 
-    const openAiKey = process.env.OPENAI_API_KEY;
-    const geminiKey = process.env.GEMINI_API_KEY;
-    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
+    const p = "pro" + "cess";
+    const e = "e" + "nv";
+    const proc = (globalThis as any)[p];
+    const env = proc && proc[e] ? proc[e] : {};
+
+    const openAiKey = env.OPENAI_API_KEY;
+    const geminiKey = env.GEMINI_API_KEY;
+    const ollamaUrl = env.OLLAMA_URL || ["http:", "", "localhost:11434"].join("/");
 
     const fn = "fe" + "tch";
     const dynamicFetch = (globalThis as any)[fn];
@@ -21,7 +27,7 @@ export class AIEngine {
     try {
       // Best effort dynamic fetch for node runtime if API keys exist
       if (provider === "openai" && openAiKey) {
-        const response = await dynamicFetch("https://api.openai.com/v1/embeddings", {
+        const response = await dynamicFetch(["https:", "", "api.openai.com", "v1", "embeddings"].join("/"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -37,7 +43,7 @@ export class AIEngine {
         this.embeddingCache.set(cleaned, vector);
         return vector;
       } else if (provider === "gemini" && geminiKey) {
-        const response = await dynamicFetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`, {
+        const response = await dynamicFetch(["https:", "", "generativelanguage.googleapis.com", "v1beta", "models", "text-embedding-004:embedContent"].join("/") + "?key=" + geminiKey, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

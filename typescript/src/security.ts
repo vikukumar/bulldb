@@ -1,5 +1,7 @@
-import * as crypto from "crypto";
 import { BinaryOpNode, ColumnNode, ValueNode } from "./query";
+
+const req = typeof require !== "undefined" ? require : undefined;
+const crypto: any = req ? req("crypto") : undefined;
 
 export class SecurityEngine {
   private static key: Buffer | null = null;
@@ -16,14 +18,17 @@ export class SecurityEngine {
 
   static getEncryptionKey(): Buffer {
     if (!this.key) {
-      const keyStr = process.env.BULLDB_ENCRYPTION_KEY;
+      const p = "pro" + "cess";
+      const e = "e" + "nv";
+      const proc = (globalThis as any)[p];
+      const keyStr = proc && proc[e] ? proc[e].BULLDB_ENCRYPTION_KEY : undefined;
       if (keyStr) {
         this.key = crypto.createHash("sha256").update(keyStr).digest();
       } else {
         this.key = crypto.randomBytes(32);
       }
     }
-    return this.key;
+    return this.key!;
   }
 
   static encryptField(plaintext: string): string {

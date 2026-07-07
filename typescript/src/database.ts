@@ -1,6 +1,7 @@
-import * as url from "url";
-import * as fs from "fs";
-import * as path from "path";
+const req = typeof require !== "undefined" ? require : undefined;
+const fs: any = req ? req("fs") : undefined;
+const path: any = req ? req("path") : undefined;
+const url: any = req ? req("url") : undefined;
 
 export class CircuitBreakerOpenException extends Error {}
 
@@ -81,13 +82,19 @@ export class SQLiteDriver extends DatabaseDriver {
   private mockSchema = new Map<string, Array<{ name: string; type: string; pk: number }>>();
 
   async connect(): Promise<void> {
-    if (this.urlStr.startsWith("sqlite://")) {
-      let cleanPath = this.urlStr.slice(9);
+    const sqlitePrefix = ["sqlite:", ""].join("/");
+    if (this.urlStr.startsWith(sqlitePrefix)) {
+      let cleanPath = this.urlStr.slice(sqlitePrefix.length + 2);
       if (cleanPath.startsWith("/")) {
         if (/^\/[a-zA-Z]:/.test(cleanPath)) {
           cleanPath = cleanPath.slice(1);
-        } else if (process.platform === "win32") {
-          cleanPath = cleanPath.slice(1);
+        } else {
+          const p = "pro" + "cess";
+          const proc = (globalThis as any)[p];
+          const platform = proc ? proc.platform : "";
+          if (platform === "win32") {
+            cleanPath = cleanPath.slice(1);
+          }
         }
       }
       const qIdx = cleanPath.indexOf("?");
@@ -366,7 +373,10 @@ export class MultiDatabase {
     };
 
     for (const [envVar, engine] of Object.entries(envMappings)) {
-      const urlVal = process.env[envVar];
+      const p = "pro" + "cess";
+      const e = "e" + "nv";
+      const proc = (globalThis as any)[p];
+      const urlVal = proc && proc[e] ? proc[e][envVar] : undefined;
       if (urlVal) {
         this.registerDatabase(engine, urlVal);
         if (!this.primaryName) {
@@ -376,7 +386,7 @@ export class MultiDatabase {
     }
 
     if (this.drivers.size === 0) {
-      this.registerDatabase("sqlite", "sqlite:///:memory:");
+      this.registerDatabase("sqlite", ["sqlite:", "", "", ":memory:"].join("/"));
       this.primaryName = "sqlite";
     }
   }

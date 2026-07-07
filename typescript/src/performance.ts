@@ -23,14 +23,9 @@ export class LocalCache {
 export class RedisCache {
   private client: any = null;
 
-  constructor(host = "localhost", port = 6379) {
-    try {
-      const r = "re" + "dis";
-      const redis = require(r);
-      this.client = redis.createClient({ url: `redis://${host}:${port}` });
-      this.client.connect().catch(() => {});
-    } catch (err) {
-      // redis module missing, bypass
+  constructor(clientInstance?: any) {
+    if (clientInstance) {
+      this.client = clientInstance;
     }
   }
 
