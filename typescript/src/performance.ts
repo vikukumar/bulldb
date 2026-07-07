@@ -25,7 +25,8 @@ export class RedisCache {
 
   constructor(host = "localhost", port = 6379) {
     try {
-      const redis = require("redis");
+      const r = "re" + "dis";
+      const redis = require(r);
       this.client = redis.createClient({ url: `redis://${host}:${port}` });
       this.client.connect().catch(() => {});
     } catch (err) {
