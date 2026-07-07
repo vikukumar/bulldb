@@ -84,7 +84,11 @@ export class SQLiteDriver extends DatabaseDriver {
     if (this.urlStr.startsWith("sqlite://")) {
       let cleanPath = this.urlStr.slice(9);
       if (cleanPath.startsWith("/")) {
-        cleanPath = cleanPath.slice(1);
+        if (/^\/[a-zA-Z]:/.test(cleanPath)) {
+          cleanPath = cleanPath.slice(1);
+        } else if (process.platform === "win32") {
+          cleanPath = cleanPath.slice(1);
+        }
       }
       const qIdx = cleanPath.indexOf("?");
       if (qIdx !== -1) {

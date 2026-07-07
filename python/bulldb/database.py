@@ -113,7 +113,11 @@ class SQLiteDriver(DatabaseDriver):
         if self.url.startswith("sqlite://"):
             db_path = self.url[9:]
             if db_path.startswith("/"):
-                db_path = db_path[1:]
+                import platform
+                if len(db_path) > 2 and db_path[2] == ":" and db_path[1].isalpha():
+                    db_path = db_path[1:]
+                elif platform.system() == "Windows":
+                    db_path = db_path[1:]
             if "?" in db_path:
                 db_path = db_path.split("?")[0]
         

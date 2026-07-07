@@ -88,7 +88,14 @@ namespace BullDB
                     var cleanPath = _dsn.Substring(9);
                     if (cleanPath.StartsWith("/"))
                     {
-                        cleanPath = cleanPath.Substring(1);
+                        if (cleanPath.Length > 2 && cleanPath[2] == ':' && char.IsLetter(cleanPath[1]))
+                        {
+                            cleanPath = cleanPath.Substring(1);
+                        }
+                        else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+                        {
+                            cleanPath = cleanPath.Substring(1);
+                        }
                     }
                     int qIdx = cleanPath.IndexOf('?');
                     if (qIdx != -1)
