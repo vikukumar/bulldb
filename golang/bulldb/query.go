@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 )
@@ -75,6 +76,14 @@ func (qb *QueryBuilder) Find(ctx context.Context, dest interface{}) error {
 	if destVal.Kind() != reflect.Ptr || destVal.Elem().Kind() != reflect.Slice {
 		return fmt.Errorf("dest must be a pointer to a slice of structs")
 	}
+
+	// Auto Intelligence: Warn/guard against large or unconstrained queries
+	if qb.limitVal < 0 || qb.limitVal > 10000 {
+		log.Printf("[Query Intelligence] Query on table \"%s\" is unconstrained or has a very large limit. Consider adding a smaller LIMIT to optimize performance and prevent memory exhaustion.", qb.tableName)
+	}
+
+	// Auto Intelligence: Record query for N+1 detection
+	GlobalDetector.RecordQuery(qb.tableName)
 
 	sliceVal := destVal.Elem()
 	itemType := sliceVal.Type().Elem()

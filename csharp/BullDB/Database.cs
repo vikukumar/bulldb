@@ -123,67 +123,75 @@ namespace BullDB
             {
                 if (!_cb.AllowRequest()) throw new InvalidOperationException("circuit breaker is OPEN");
 
-                var results = new List<Dictionary<string, object>>();
-
-                if (query.ToUpper().Contains("CREATE TABLE"))
+                try
                 {
-                    var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 3)
+                    var results = new List<Dictionary<string, object>>();
+
+                    if (query.ToUpper().Contains("CREATE TABLE"))
                     {
-                        var table = parts[2].Trim('(', ')', ',');
-                        if (!MockDb.ContainsKey(table))
+                        var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 3)
                         {
-                            MockDb[table] = new List<Dictionary<string, object>>();
+                            var table = parts[2].Trim('(', ')', ',');
+                            if (!MockDb.ContainsKey(table))
+                            {
+                                MockDb[table] = new List<Dictionary<string, object>>();
+                            }
+                        }
+                        _cb.RecordSuccess();
+                        return Task.FromResult(results);
+                    }
+
+                    if (query.Contains("sqlite_master"))
+                    {
+                        foreach (var table in MockDb.Keys)
+                        {
+                            results.Add(new Dictionary<string, object> { { "name", table } });
+                        }
+                        _cb.RecordSuccess();
+                        return Task.FromResult(results);
+                    }
+
+                    if (query.Contains("PRAGMA table_info"))
+                    {
+                        var parts = query.Split('(', ')');
+                        if (parts.Length >= 2)
+                        {
+                            var table = parts[1].Trim();
+                            if (table == "users")
+                            {
+                                results.Add(new Dictionary<string, object> { { "name", "id" }, { "type", "TEXT" }, { "pk", 1 } });
+                                results.Add(new Dictionary<string, object> { { "name", "email" }, { "type", "TEXT" }, { "pk", 0 } });
+                                results.Add(new Dictionary<string, object> { { "name", "secret_note" }, { "type", "BLOB" }, { "pk", 0 } });
+                                results.Add(new Dictionary<string, object> { { "name", "password" }, { "type", "TEXT" }, { "pk", 0 } });
+                            }
+                        }
+                        _cb.RecordSuccess();
+                        return Task.FromResult(results);
+                    }
+
+                    if (query.ToUpper().StartsWith("SELECT"))
+                    {
+                        var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 4)
+                        {
+                            var table = parts[3];
+                            if (MockDb.ContainsKey(table))
+                            {
+                                _cb.RecordSuccess();
+                                return Task.FromResult(new List<Dictionary<string, object>>(MockDb[table]));
+                            }
                         }
                     }
+
                     _cb.RecordSuccess();
                     return Task.FromResult(results);
                 }
-
-                if (query.Contains("sqlite_master"))
+                catch (Exception)
                 {
-                    foreach (var table in MockDb.Keys)
-                    {
-                        results.Add(new Dictionary<string, object> { { "name", table } });
-                    }
-                    _cb.RecordSuccess();
-                    return Task.FromResult(results);
+                    _cb.RecordFailure();
+                    throw;
                 }
-
-                if (query.Contains("PRAGMA table_info"))
-                {
-                    var parts = query.Split('(', ')');
-                    if (parts.Length >= 2)
-                    {
-                        var table = parts[1].Trim();
-                        if (table == "users")
-                        {
-                            results.Add(new Dictionary<string, object> { { "name", "id" }, { "type", "TEXT" }, { "pk", 1 } });
-                            results.Add(new Dictionary<string, object> { { "name", "email" }, { "type", "TEXT" }, { "pk", 0 } });
-                            results.Add(new Dictionary<string, object> { { "name", "secret_note" }, { "type", "BLOB" }, { "pk", 0 } });
-                            results.Add(new Dictionary<string, object> { { "name", "password" }, { "type", "TEXT" }, { "pk", 0 } });
-                        }
-                    }
-                    _cb.RecordSuccess();
-                    return Task.FromResult(results);
-                }
-
-                if (query.ToUpper().StartsWith("SELECT"))
-                {
-                    var parts = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 4)
-                    {
-                        var table = parts[3];
-                        if (MockDb.ContainsKey(table))
-                        {
-                            _cb.RecordSuccess();
-                            return Task.FromResult(new List<Dictionary<string, object>>(MockDb[table]));
-                        }
-                    }
-                }
-
-                _cb.RecordSuccess();
-                return Task.FromResult(results);
             }
         }
 

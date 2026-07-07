@@ -327,7 +327,7 @@ class MultiDatabase:
 
     async def execute(self, query: str, params: Optional[tuple] = None, is_write: bool = False) -> List[Dict[str, Any]]:
         driver = self.get_route("", is_write=is_write)
-        return await self._retry_with_backoff(driver, driver.execute, query, params)
+        return await self.retry_with_backoff(driver, driver.execute, query, params)
 
     async def write(self, table: str, payload: Dict[str, Any], upsert: bool = False) -> Any:
         driver = self.get_route(table, is_write=True)
@@ -379,7 +379,7 @@ class MultiDatabase:
         await driver.ensure_connected()
         return await driver.delete(table, filters)
 
-    async def _retry_with_backoff(self, driver: DatabaseDriver, func: Callable, *args, retries: int = 3, initial_delay: float = 0.5, **kwargs):
+    async def retry_with_backoff(self, driver: DatabaseDriver, func: Callable, *args, retries: int = 3, initial_delay: float = 0.5, **kwargs):
         delay = initial_delay
         last_exception = None
         for i in range(retries):

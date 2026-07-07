@@ -1,5 +1,6 @@
 import { ModelMetadataRegistry } from "./models";
 import { SecurityEngine } from "./security";
+import { N1QueryDetector, IndexAdvisor } from "./performance";
 
 export abstract class ASTNode {}
 
@@ -295,35 +296,57 @@ export class QueryBuilder<T> {
     // Inject RLS parameters
     SecurityEngine.injectRls(this.ast);
 
+    // Auto Intelligence: Warn/guard against large or unconstrained queries
+    if (this.ast.limit === null || this.ast.limit > 10000) {
+      console.warn(`[Query Intelligence] Query on table "${this.ast.table}" is unconstrained or has a very large limit. Consider adding a smaller LIMIT to optimize performance and prevent memory exhaustion.`);
+    }
+
+    // Auto Intelligence: Record query for N+1 detection
+    const [sqlForFingerprint] = QueryCompiler.compileToSql(this.ast);
+    N1QueryDetector.recordQuery(sqlForFingerprint);
+
+    // Auto Intelligence: Advisor for indexing on filter columns
+    if (this.ast.filters) {
+      const traverseFilters = (node: ASTNode) => {
+        if (node instanceof BinaryOpNode) {
+          traverseFilters(node.left);
+          traverseFilters(node.right);
+        } else if (node instanceof ColumnNode) {
+          IndexAdvisor.trackFilter(this.ast.table, node.name);
+        }
+      };
+      traverseFilters(this.ast.filters);
+    }
+
     let results: any[] = [];
     if (dialect.includes("mongo")) {
       const [filters, projection, limit] = QueryCompiler.compileToMongo(this.ast);
       if (typeof (driver as any).executeMongoFind === "function") {
-        results = await (driver as any).executeMongoFind(this.ast.table, filters, projection, limit);
+        results = await db.retryWithBackoff(driver, () => (driver as any).executeMongoFind(this.ast.table, filters, projection, limit));
       } else {
-        results = await driver.execute(JSON.stringify({ filters, projection, limit }));
+        results = await db.retryWithBackoff(driver, () => driver.execute(JSON.stringify({ filters, projection, limit })));
       }
     } else if (dialect.includes("elasticsearch")) {
       const [body, limit] = QueryCompiler.compileToElasticsearch(this.ast);
       if (typeof (driver as any).executeSearch === "function") {
-        results = await (driver as any).executeSearch(this.ast.table, body, limit);
+        results = await db.retryWithBackoff(driver, () => (driver as any).executeSearch(this.ast.table, body, limit));
       } else {
-        results = await driver.execute(JSON.stringify({ body, limit }));
+        results = await db.retryWithBackoff(driver, () => driver.execute(JSON.stringify({ body, limit })));
       }
     } else if (dialect.includes("vector") || dialect.includes("chroma") || dialect.includes("pinecone")) {
       const [vector, filters, limit] = QueryCompiler.compileToVectorQuery(this.ast);
       if (typeof (driver as any).executeVectorSearch === "function") {
-        results = await (driver as any).executeVectorSearch(this.ast.table, vector, filters, limit);
+        results = await db.retryWithBackoff(driver, () => (driver as any).executeVectorSearch(this.ast.table, vector, filters, limit));
       } else {
-        results = await driver.execute(JSON.stringify({ vector, filters, limit }));
+        results = await db.retryWithBackoff(driver, () => driver.execute(JSON.stringify({ vector, filters, limit })));
       }
     } else if (dialect.includes("neo4j")) {
       const [cypher, params] = QueryCompiler.compileToCypher(this.ast);
-      results = await driver.execute(cypher, Object.values(params));
+      results = await db.retryWithBackoff(driver, () => driver.execute(cypher, Object.values(params)));
     } else {
       // SQL fallback
       const [sql, params] = QueryCompiler.compileToSql(this.ast);
-      results = await driver.execute(sql, params);
+      results = await db.retryWithBackoff(driver, () => driver.execute(sql, params));
     }
 
     return results.map(row => new this.modelClass(row));

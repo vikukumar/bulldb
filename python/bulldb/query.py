@@ -273,24 +273,57 @@ class QueryBuilder:
         dialect = driver.name
 
         from .security import SecurityEngine
+        from .performance import N1QueryDetector, IndexAdvisor
+        import logging
+        logger = logging.getLogger("bulldb.query")
+
         SecurityEngine.inject_rls(self.ast)
+
+        # Auto Intelligence: Warn/guard against large or unconstrained queries
+        if self.ast.limit is None or self.ast.limit > 10000:
+            logger.warning(f"[Query Intelligence] Query on table \"{self.ast.table}\" is unconstrained or has a very large limit. Consider adding a smaller LIMIT to optimize performance and prevent memory exhaustion.")
+
+        # Auto Intelligence: Record query for N+1 detection
+        sql_for_fingerprint, _ = QueryCompiler.compile_to_sql(self.ast)
+        N1QueryDetector.record_query(sql_for_fingerprint)
+
+        # Auto Intelligence: Advisor for indexing on filter columns
+        if self.ast.filters:
+            def traverse_filters(node):
+                if isinstance(node, BinaryOpNode):
+                    traverse_filters(node.left)
+                    traverse_filters(node.right)
+                elif isinstance(node, ColumnNode):
+                    IndexAdvisor.track_filter(self.ast.table, node.name)
+            traverse_filters(self.ast.filters)
 
         results = []
         if "mongo" in dialect:
             filters, projection, limit = QueryCompiler.compile_to_mongo(self.ast)
-            mongo_results = await driver.execute_mongo_find(self.ast.table, filters, projection, limit)
-            results = mongo_results
+            if hasattr(driver, "execute_mongo_find") and callable(driver.execute_mongo_find):
+                results = await db.retry_with_backoff(driver, driver.execute_mongo_find, self.ast.table, filters, projection, limit)
+            else:
+                import json
+                results = await db.retry_with_backoff(driver, driver.execute, json.dumps({"filters": filters, "projection": projection, "limit": limit}))
         elif "elasticsearch" in dialect:
             body, limit = QueryCompiler.compile_to_elasticsearch(self.ast)
-            results = await driver.execute_search(self.ast.table, body, limit)
+            if hasattr(driver, "execute_search") and callable(driver.execute_search):
+                results = await db.retry_with_backoff(driver, driver.execute_search, self.ast.table, body, limit)
+            else:
+                import json
+                results = await db.retry_with_backoff(driver, driver.execute, json.dumps({"body": body, "limit": limit}))
         elif "vector" in dialect or "chroma" in dialect or "pinecone" in dialect:
             vector, filters, limit = QueryCompiler.compile_to_vector_query(self.ast)
-            results = await driver.execute_vector_search(self.ast.table, vector, filters, limit)
+            if hasattr(driver, "execute_vector_search") and callable(driver.execute_vector_search):
+                results = await db.retry_with_backoff(driver, driver.execute_vector_search, self.ast.table, vector, filters, limit)
+            else:
+                import json
+                results = await db.retry_with_backoff(driver, driver.execute, json.dumps({"vector": vector, "filters": filters, "limit": limit}))
         elif "neo4j" in dialect:
             cypher, params = QueryCompiler.compile_to_cypher(self.ast)
-            results = await driver.execute(cypher, tuple(params.values()))
+            results = await db.retry_with_backoff(driver, driver.execute, cypher, tuple(params.values()))
         else:
             sql, params = QueryCompiler.compile_to_sql(self.ast)
-            results = await driver.execute(sql, params)
+            results = await db.retry_with_backoff(driver, driver.execute, sql, params)
 
         return [self.model_class(**res) for res in results]

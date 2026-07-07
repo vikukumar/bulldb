@@ -162,6 +162,60 @@ impl SQLiteMockDriver {
             mock_schema: HashMap::new(),
         }
     }
+
+    pub fn execute_inner(&mut self, query: &str, _params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {
+        if query.to_uppercase().starts_with("CREATE TABLE") {
+            let parts: Vec<&str> = query.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let table_name = parts[2].trim_matches(|c| c == '(' || c == ')');
+                if !self.mock_db.contains_key(table_name) {
+                    self.mock_db.insert(table_name.to_string(), Vec::new());
+                }
+            }
+            return Ok(Vec::new());
+        }
+
+        if query.contains("sqlite_master") {
+            let mut rows = Vec::new();
+            for table_name in self.mock_db.keys() {
+                let mut m = HashMap::new();
+                m.insert("name".to_string(), Value::Text(table_name.clone()));
+                rows.push(m);
+            }
+            return Ok(rows);
+        }
+
+        if query.contains("PRAGMA table_info") {
+            let mut rows = Vec::new();
+            let parts: Vec<&str> = query.split(|c| c == '(' || c == ')').collect();
+            if parts.len() >= 2 {
+                let table_name = parts[1].trim();
+                if table_name == "users" {
+                    let cols = vec![("id", "TEXT", true), ("email", "TEXT", false), ("secret_note", "BLOB", false), ("password", "TEXT", false)];
+                    for (c_name, c_type, is_pk) in cols {
+                        let mut m = HashMap::new();
+                        m.insert("name".to_string(), Value::Text(c_name.to_string()));
+                        m.insert("type".to_string(), Value::Text(c_type.to_string()));
+                        m.insert("pk".to_string(), Value::Integer(if is_pk { 1 } else { 0 }));
+                        rows.push(m);
+                    }
+                }
+            }
+            return Ok(rows);
+        }
+
+        if query.to_uppercase().starts_with("SELECT") {
+            let parts: Vec<&str> = query.split_whitespace().collect();
+            if parts.len() >= 4 {
+                let table_name = parts[3];
+                if let Some(data) = self.mock_db.get(table_name) {
+                    return Ok(data.clone());
+                }
+            }
+        }
+
+        Ok(Vec::new())
+    }
 }
 
 impl DatabaseDriver for SQLiteMockDriver {
@@ -198,67 +252,20 @@ impl DatabaseDriver for SQLiteMockDriver {
     fn ensure_connected(&mut self) -> Result<(), String> { Ok(()) }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
-    fn execute(&mut self, query: &str, _params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {
+    fn execute(&mut self, query: &str, params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {
         if !self.circuit_breaker.allow_request() {
             return Err("circuit breaker is OPEN".to_string());
         }
-
-        if query.to_uppercase().starts_with("CREATE TABLE") {
-            let parts: Vec<&str> = query.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let table_name = parts[2].trim_matches(|c| c == '(' || c == ')');
-                if !self.mock_db.contains_key(table_name) {
-                    self.mock_db.insert(table_name.to_string(), Vec::new());
-                }
+        match self.execute_inner(query, params) {
+            Ok(v) => {
+                self.circuit_breaker.record_success();
+                Ok(v)
             }
-            self.circuit_breaker.record_success();
-            return Ok(Vec::new());
-        }
-
-        if query.contains("sqlite_master") {
-            let mut rows = Vec::new();
-            for table_name in self.mock_db.keys() {
-                let mut m = HashMap::new();
-                m.insert("name".to_string(), Value::Text(table_name.clone()));
-                rows.push(m);
-            }
-            self.circuit_breaker.record_success();
-            return Ok(rows);
-        }
-
-        if query.contains("PRAGMA table_info") {
-            let mut rows = Vec::new();
-            let parts: Vec<&str> = query.split(|c| c == '(' || c == ')').collect();
-            if parts.len() >= 2 {
-                let table_name = parts[1].trim();
-                if table_name == "users" {
-                    let cols = vec![("id", "TEXT", true), ("email", "TEXT", false), ("secret_note", "BLOB", false), ("password", "TEXT", false)];
-                    for (c_name, c_type, is_pk) in cols {
-                        let mut m = HashMap::new();
-                        m.insert("name".to_string(), Value::Text(c_name.to_string()));
-                        m.insert("type".to_string(), Value::Text(c_type.to_string()));
-                        m.insert("pk".to_string(), Value::Integer(if is_pk { 1 } else { 0 }));
-                        rows.push(m);
-                    }
-                }
-            }
-            self.circuit_breaker.record_success();
-            return Ok(rows);
-        }
-
-        if query.to_uppercase().starts_with("SELECT") {
-            let parts: Vec<&str> = query.split_whitespace().collect();
-            if parts.len() >= 4 {
-                let table_name = parts[3];
-                if let Some(data) = self.mock_db.get(table_name) {
-                    self.circuit_breaker.record_success();
-                    return Ok(data.clone());
-                }
+            Err(e) => {
+                self.circuit_breaker.record_failure();
+                Err(e)
             }
         }
-
-        self.circuit_breaker.record_success();
-        Ok(Vec::new())
     }
 }
 
@@ -386,6 +393,14 @@ impl<'a, M: Model> QueryBuilder<'a, M> {
     }
 
     pub fn execute(&self) -> Result<Vec<M>, String> {
+        // Auto Intelligence: Warn/guard against large or unconstrained queries
+        if self.limit_val.is_none() || self.limit_val.unwrap_or(0) > 10000 {
+            println!("[Query Intelligence] Query on table \"{}\" is unconstrained or has a very large limit. Consider adding a smaller LIMIT to optimize performance and prevent memory exhaustion.", M::table_name());
+        }
+
+        // Auto Intelligence: Record query for N+1 detection
+        performance::record_query_execution(M::table_name());
+
         let (mut sql, mut params) = self.compile();
         let mut wheres = self.wheres.clone();
         let mut args = self.args.clone();

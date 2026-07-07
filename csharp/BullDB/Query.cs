@@ -69,6 +69,15 @@ namespace BullDB
 
         public async Task<List<T>> ExecuteAsync()
         {
+            // Auto Intelligence: Warn/guard against large or unconstrained queries
+            if (_limit < 0 || _limit > 10000)
+            {
+                Console.WriteLine($"[Query Intelligence] Query on table \"{_tableName}\" is unconstrained or has a very large limit. Consider adding a smaller LIMIT to optimize performance and prevent memory exhaustion.");
+            }
+
+            // Auto Intelligence: Record query for N+1 detection
+            N1QueryDetector.Instance.RecordQuery(_tableName);
+
             var sql = $"SELECT * FROM {_tableName}";
             if (_wheres.Count > 0)
             {

@@ -108,8 +108,17 @@ export class SQLiteDriver extends DatabaseDriver {
     if (!this.circuitBreaker.allowRequest()) {
       throw new CircuitBreakerOpenException(`Database driver ${this.name} circuit is OPEN`);
     }
-    this.circuitBreaker.recordSuccess();
+    try {
+      const res = await this.executeInner(query, params);
+      this.circuitBreaker.recordSuccess();
+      return res;
+    } catch (err) {
+      this.circuitBreaker.recordFailure();
+      throw err;
+    }
+  }
 
+  private async executeInner(query: string, params?: any[]): Promise<any[]> {
     // 1. CREATE TABLE
     const createMatch = query.match(/CREATE TABLE(?: IF NOT EXISTS)?\s+(\w+)\s*\((.+)\)/i);
     if (createMatch) {
@@ -464,7 +473,7 @@ export class MultiDatabase {
     return driver.delete(table, filters);
   }
 
-  private async retryWithBackoff<T>(driver: DatabaseDriver, fn: () => Promise<T>, retries = 3, initialDelay = 500): Promise<T> {
+  async retryWithBackoff<T>(driver: DatabaseDriver, fn: () => Promise<T>, retries = 3, initialDelay = 500): Promise<T> {
     let delay = initialDelay;
     let lastError: any = null;
     for (let i = 0; i < retries; i++) {
