@@ -142,6 +142,8 @@ pub trait DatabaseDriver: Send + Sync {
     fn execute(&mut self, query: &str, params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String>;
     fn get_name(&self) -> String;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn get_connection_info(&self) -> HashMap<String, String>;
+    fn test_connection(&mut self) -> HashMap<String, String>;
 }
 
 pub struct SQLiteMockDriver {
@@ -150,6 +152,10 @@ pub struct SQLiteMockDriver {
     circuit_breaker: CircuitBreaker,
     pub mock_db: HashMap<String, Vec<HashMap<String, Value>>>,
     pub mock_schema: HashMap<String, Vec<(String, String, bool)>>,
+    status: String,
+    last_ping_time: Option<Instant>,
+    last_ping_result: bool,
+    last_error: Option<String>,
 }
 
 impl SQLiteMockDriver {
@@ -160,6 +166,10 @@ impl SQLiteMockDriver {
             circuit_breaker: CircuitBreaker::new(5, Duration::from_secs(10)),
             mock_db: HashMap::new(),
             mock_schema: HashMap::new(),
+            status: "DISCONNECTED".to_string(),
+            last_ping_time: None,
+            last_ping_result: false,
+            last_error: None,
         }
     }
 
@@ -252,11 +262,30 @@ impl DatabaseDriver for SQLiteMockDriver {
                 }
             }
         }
+        self.status = "CONNECTED".to_string();
         Ok(())
     }
-    fn disconnect(&mut self) -> Result<(), String> { Ok(()) }
-    fn ping(&mut self) -> bool { true }
-    fn ensure_connected(&mut self) -> Result<(), String> { Ok(()) }
+    fn disconnect(&mut self) -> Result<(), String> {
+        self.status = "DISCONNECTED".to_string();
+        Ok(())
+    }
+    fn ping(&mut self) -> bool {
+        if let Some(last) = self.last_ping_time {
+            if last.elapsed() < Duration::from_secs(1) {
+                return self.last_ping_result;
+            }
+        }
+        let res = self.status == "CONNECTED";
+        self.last_ping_time = Some(Instant::now());
+        self.last_ping_result = res;
+        res
+    }
+    fn ensure_connected(&mut self) -> Result<(), String> {
+        if !self.ping() {
+            self.connect()?;
+        }
+        Ok(())
+    }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn execute(&mut self, query: &str, params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {
@@ -274,27 +303,431 @@ impl DatabaseDriver for SQLiteMockDriver {
             }
         }
     }
+
+    fn get_connection_info(&self) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("driver".to_string(), "sqlite".to_string());
+        m.insert("status".to_string(), self.status.clone());
+        let mut clean_path = &self.url[..];
+        if self.url.starts_with("sqlite://") {
+            clean_path = &self.url[9..];
+            if clean_path.starts_with("/:memory:") {
+                clean_path = &clean_path[1..];
+            }
+            if clean_path.starts_with('/') {
+                if clean_path.len() > 2 && clean_path.as_bytes()[2] == b':' && clean_path.as_bytes()[1].is_ascii_alphabetic() {
+                    clean_path = &clean_path[1..];
+                } else if cfg!(windows) {
+                    clean_path = &clean_path[1..];
+                }
+            }
+            if let Some(idx) = clean_path.find('?') {
+                clean_path = &clean_path[..idx];
+            }
+        }
+        m.insert("path".to_string(), if clean_path.is_empty() { ":memory:".to_string() } else { clean_path.to_string() });
+        if let Some(ref err) = self.last_error {
+            m.insert("error_message".to_string(), err.clone());
+        }
+        m
+    }
+
+    fn test_connection(&mut self) -> HashMap<String, String> {
+        let mut res = HashMap::new();
+        match self.connect() {
+            Ok(_) => {
+                res.insert("success".to_string(), "true".to_string());
+                res.insert("message".to_string(), "Successfully connected to SQLite".to_string());
+            }
+            Err(e) => {
+                self.status = "ERROR".to_string();
+                self.last_error = Some(e.clone());
+                res.insert("success".to_string(), "false".to_string());
+                res.insert("message".to_string(), format!("Failed to connect: {}", e));
+            }
+        }
+        let info = self.get_connection_info();
+        for (k, v) in info {
+            res.insert(format!("info_{}", k), v);
+        }
+        res
+    }
 }
 
 pub struct MongoDriver {
     name: String,
+    url: String,
+    status: String,
+    last_ping_time: Option<Instant>,
+    last_ping_result: bool,
+    last_error: Option<String>,
 }
 
 impl MongoDriver {
-    pub fn new(name: String) -> Self {
-        Self { name }
+    pub fn new(name: String, url: String) -> Self {
+        Self {
+            name,
+            url,
+            status: "DISCONNECTED".to_string(),
+            last_ping_time: None,
+            last_ping_result: false,
+            last_error: None,
+        }
+    }
+
+    fn parse_url(&self) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("host".to_string(), "localhost".to_string());
+        m.insert("port".to_string(), "27017".to_string());
+        m.insert("database".to_string(), "admin".to_string());
+        m.insert("username".to_string(), "".to_string());
+
+        let cleaned = self.url.replace("mongodb://", "").replace("mongodb+srv://", "");
+        let parts: Vec<&str> = cleaned.split('/').collect();
+        if parts.len() > 1 {
+            let mut db_part = parts[1];
+            if let Some(idx) = db_part.find('?') {
+                db_part = &db_part[..idx];
+            }
+            m.insert("database".to_string(), db_part.to_string());
+        }
+
+        let auth_host = parts[0];
+        let (auth, host_port) = if let Some(idx) = auth_host.rfind('@') {
+            (&auth_host[..idx], &auth_host[idx+1..])
+        } else {
+            ("", auth_host)
+        };
+
+        if !auth.is_empty() {
+            let auth_parts: Vec<&str> = auth.split(':').collect();
+            m.insert("username".to_string(), auth_parts[0].to_string());
+        }
+
+        if !host_port.is_empty() {
+            let hp_parts: Vec<&str> = host_port.split(':').collect();
+            m.insert("host".to_string(), hp_parts[0].to_string());
+            if hp_parts.len() > 1 {
+                m.insert("port".to_string(), hp_parts[1].to_string());
+            }
+        }
+        m
     }
 }
 
 impl DatabaseDriver for MongoDriver {
     fn get_name(&self) -> String { self.name.clone() }
-    fn connect(&mut self) -> Result<(), String> { Ok(()) }
-    fn disconnect(&mut self) -> Result<(), String> { Ok(()) }
-    fn ping(&mut self) -> bool { true }
-    fn ensure_connected(&mut self) -> Result<(), String> { Ok(()) }
+    fn connect(&mut self) -> Result<(), String> {
+        self.status = "CONNECTED".to_string();
+        Ok(())
+    }
+    fn disconnect(&mut self) -> Result<(), String> {
+        self.status = "DISCONNECTED".to_string();
+        Ok(())
+    }
+    fn ping(&mut self) -> bool {
+        if let Some(last) = self.last_ping_time {
+            if last.elapsed() < Duration::from_secs(1) {
+                return self.last_ping_result;
+            }
+        }
+        let res = self.status == "CONNECTED";
+        self.last_ping_time = Some(Instant::now());
+        self.last_ping_result = res;
+        res
+    }
+    fn ensure_connected(&mut self) -> Result<(), String> {
+        if !self.ping() {
+            self.connect()?;
+        }
+        Ok(())
+    }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     fn execute(&mut self, _query: &str, _params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {
         Ok(Vec::new())
+    }
+
+    fn get_connection_info(&self) -> HashMap<String, String> {
+        let mut m = self.parse_url();
+        m.insert("driver".to_string(), "mongo".to_string());
+        m.insert("status".to_string(), self.status.clone());
+        if let Some(ref err) = self.last_error {
+            m.insert("error_message".to_string(), err.clone());
+        }
+        m
+    }
+
+    fn test_connection(&mut self) -> HashMap<String, String> {
+        let mut res = HashMap::new();
+        match self.connect() {
+            Ok(_) => {
+                res.insert("success".to_string(), "true".to_string());
+                res.insert("message".to_string(), "Successfully simulated connection to MongoDB".to_string());
+            }
+            Err(e) => {
+                self.status = "ERROR".to_string();
+                self.last_error = Some(e.clone());
+                res.insert("success".to_string(), "false".to_string());
+                res.insert("message".to_string(), format!("Failed to connect: {}", e));
+            }
+        }
+        let info = self.get_connection_info();
+        for (k, v) in info {
+            res.insert(format!("info_{}", k), v);
+        }
+        res
+    }
+}
+
+pub struct PostgresDriver {
+    name: String,
+    url: String,
+    status: String,
+    last_ping_time: Option<Instant>,
+    last_ping_result: bool,
+    last_error: Option<String>,
+}
+
+impl PostgresDriver {
+    pub fn new(name: String, url: String) -> Self {
+        Self {
+            name,
+            url,
+            status: "DISCONNECTED".to_string(),
+            last_ping_time: None,
+            last_ping_result: false,
+            last_error: None,
+        }
+    }
+
+    fn parse_url(&self) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("host".to_string(), "localhost".to_string());
+        m.insert("port".to_string(), "5432".to_string());
+        m.insert("database".to_string(), "postgres".to_string());
+        m.insert("username".to_string(), "postgres".to_string());
+
+        let cleaned = self.url.replace("postgresql://", "").replace("postgres://", "");
+        let parts: Vec<&str> = cleaned.split('/').collect();
+        if parts.len() > 1 {
+            let mut db_part = parts[1];
+            if let Some(idx) = db_part.find('?') {
+                db_part = &db_part[..idx];
+            }
+            m.insert("database".to_string(), db_part.to_string());
+        }
+
+        let auth_host = parts[0];
+        let (auth, host_port) = if let Some(idx) = auth_host.rfind('@') {
+            (&auth_host[..idx], &auth_host[idx+1..])
+        } else {
+            ("", auth_host)
+        };
+
+        if !auth.is_empty() {
+            let auth_parts: Vec<&str> = auth.split(':').collect();
+            m.insert("username".to_string(), auth_parts[0].to_string());
+        }
+
+        if !host_port.is_empty() {
+            let hp_parts: Vec<&str> = host_port.split(':').collect();
+            m.insert("host".to_string(), hp_parts[0].to_string());
+            if hp_parts.len() > 1 {
+                m.insert("port".to_string(), hp_parts[1].to_string());
+            }
+        }
+        m
+    }
+}
+
+impl DatabaseDriver for PostgresDriver {
+    fn get_name(&self) -> String { self.name.clone() }
+    fn connect(&mut self) -> Result<(), String> {
+        self.status = "CONNECTED".to_string();
+        Ok(())
+    }
+    fn disconnect(&mut self) -> Result<(), String> {
+        self.status = "DISCONNECTED".to_string();
+        Ok(())
+    }
+    fn ping(&mut self) -> bool {
+        if let Some(last) = self.last_ping_time {
+            if last.elapsed() < Duration::from_secs(1) {
+                return self.last_ping_result;
+            }
+        }
+        let res = self.status == "CONNECTED";
+        self.last_ping_time = Some(Instant::now());
+        self.last_ping_result = res;
+        res
+    }
+    fn ensure_connected(&mut self) -> Result<(), String> {
+        if !self.ping() {
+            self.connect()?;
+        }
+        Ok(())
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn execute(&mut self, _query: &str, _params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {
+        Ok(Vec::new())
+    }
+
+    fn get_connection_info(&self) -> HashMap<String, String> {
+        let mut m = self.parse_url();
+        m.insert("driver".to_string(), "postgres".to_string());
+        m.insert("status".to_string(), self.status.clone());
+        if let Some(ref err) = self.last_error {
+            m.insert("error_message".to_string(), err.clone());
+        }
+        m
+    }
+
+    fn test_connection(&mut self) -> HashMap<String, String> {
+        let mut res = HashMap::new();
+        match self.connect() {
+            Ok(_) => {
+                res.insert("success".to_string(), "true".to_string());
+                res.insert("message".to_string(), "Successfully simulated connection to PostgreSQL".to_string());
+            }
+            Err(e) => {
+                self.status = "ERROR".to_string();
+                self.last_error = Some(e.clone());
+                res.insert("success".to_string(), "false".to_string());
+                res.insert("message".to_string(), format!("Failed to connect: {}", e));
+            }
+        }
+        let info = self.get_connection_info();
+        for (k, v) in info {
+            res.insert(format!("info_{}", k), v);
+        }
+        res
+    }
+}
+
+pub struct MySQLDriver {
+    name: String,
+    url: String,
+    status: String,
+    last_ping_time: Option<Instant>,
+    last_ping_result: bool,
+    last_error: Option<String>,
+}
+
+impl MySQLDriver {
+    pub fn new(name: String, url: String) -> Self {
+        Self {
+            name,
+            url,
+            status: "DISCONNECTED".to_string(),
+            last_ping_time: None,
+            last_ping_result: false,
+            last_error: None,
+        }
+    }
+
+    fn parse_url(&self) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("host".to_string(), "localhost".to_string());
+        m.insert("port".to_string(), "3306".to_string());
+        m.insert("database".to_string(), "mysql".to_string());
+        m.insert("username".to_string(), "root".to_string());
+
+        let cleaned = self.url.replace("mysql://", "").replace("mysqls://", "");
+        let parts: Vec<&str> = cleaned.split('/').collect();
+        if parts.len() > 1 {
+            let mut db_part = parts[1];
+            if let Some(idx) = db_part.find('?') {
+                db_part = &db_part[..idx];
+            }
+            m.insert("database".to_string(), db_part.to_string());
+        }
+
+        let auth_host = parts[0];
+        let (auth, host_port) = if let Some(idx) = auth_host.rfind('@') {
+            (&auth_host[..idx], &auth_host[idx+1..])
+        } else {
+            ("", auth_host)
+        };
+
+        if !auth.is_empty() {
+            let auth_parts: Vec<&str> = auth.split(':').collect();
+            m.insert("username".to_string(), auth_parts[0].to_string());
+        }
+
+        if !host_port.is_empty() {
+            let hp_parts: Vec<&str> = host_port.split(':').collect();
+            m.insert("host".to_string(), hp_parts[0].to_string());
+            if hp_parts.len() > 1 {
+                m.insert("port".to_string(), hp_parts[1].to_string());
+            }
+        }
+        m
+    }
+}
+
+impl DatabaseDriver for MySQLDriver {
+    fn get_name(&self) -> String { self.name.clone() }
+    fn connect(&mut self) -> Result<(), String> {
+        self.status = "CONNECTED".to_string();
+        Ok(())
+    }
+    fn disconnect(&mut self) -> Result<(), String> {
+        self.status = "DISCONNECTED".to_string();
+        Ok(())
+    }
+    fn ping(&mut self) -> bool {
+        if let Some(last) = self.last_ping_time {
+            if last.elapsed() < Duration::from_secs(1) {
+                return self.last_ping_result;
+            }
+        }
+        let res = self.status == "CONNECTED";
+        self.last_ping_time = Some(Instant::now());
+        self.last_ping_result = res;
+        res
+    }
+    fn ensure_connected(&mut self) -> Result<(), String> {
+        if !self.ping() {
+            self.connect()?;
+        }
+        Ok(())
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn execute(&mut self, _query: &str, _params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {
+        Ok(Vec::new())
+    }
+
+    fn get_connection_info(&self) -> HashMap<String, String> {
+        let mut m = self.parse_url();
+        m.insert("driver".to_string(), "mysql".to_string());
+        m.insert("status".to_string(), self.status.clone());
+        if let Some(ref err) = self.last_error {
+            m.insert("error_message".to_string(), err.clone());
+        }
+        m
+    }
+
+    fn test_connection(&mut self) -> HashMap<String, String> {
+        let mut res = HashMap::new();
+        match self.connect() {
+            Ok(_) => {
+                res.insert("success".to_string(), "true".to_string());
+                res.insert("message".to_string(), "Successfully simulated connection to MySQL".to_string());
+            }
+            Err(e) => {
+                self.status = "ERROR".to_string();
+                self.last_error = Some(e.clone());
+                res.insert("success".to_string(), "false".to_string());
+                res.insert("message".to_string(), format!("Failed to connect: {}", e));
+            }
+        }
+        let info = self.get_connection_info();
+        for (k, v) in info {
+            res.insert(format!("info_{}", k), v);
+        }
+        res
     }
 }
 
@@ -311,6 +744,22 @@ impl MultiDatabase {
             drivers: Arc::new(Mutex::new(drivers)),
             primary_name: "sqlite".to_string(),
         }
+    }
+
+    pub fn register_database(&self, name: String, conn_str: String) {
+        let mut m = self.drivers.lock().unwrap();
+        let driver: Box<dyn DatabaseDriver> = if conn_str.starts_with("sqlite://") || conn_str.starts_with("sqlite:") {
+            Box::new(SQLiteMockDriver::new(name.clone(), conn_str))
+        } else if conn_str.starts_with("mongodb://") || conn_str.starts_with("mongodb+srv://") || conn_str.starts_with("mongo") {
+            Box::new(MongoDriver::new(name.clone(), conn_str))
+        } else if conn_str.starts_with("postgres://") || conn_str.starts_with("postgresql://") {
+            Box::new(PostgresDriver::new(name.clone(), conn_str))
+        } else if conn_str.starts_with("mysql://") {
+            Box::new(MySQLDriver::new(name.clone(), conn_str))
+        } else {
+            Box::new(SQLiteMockDriver::new(name.clone(), conn_str))
+        };
+        m.insert(name, driver);
     }
 
     pub fn execute(&self, query: &str, params: Vec<Value>) -> Result<Vec<HashMap<String, Value>>, String> {

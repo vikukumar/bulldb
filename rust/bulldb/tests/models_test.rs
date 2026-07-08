@@ -191,3 +191,42 @@ fn test_rust_sqlite_auto_creation() {
     let _ = std::fs::remove_dir_all(path);
 }
 
+#[test]
+fn test_rust_oop_drivers_and_connection_info() {
+    let mdb = MultiDatabase::new();
+    mdb.register_database("my_pg".to_string(), "postgresql://dbuser:secretpass@dbhost:5432/mydb".to_string());
+    mdb.register_database("my_mysql".to_string(), "mysql://root:password123@127.0.0.1:3306/testdb".to_string());
+    mdb.register_database("my_mongo".to_string(), "mongodb://admin:pass@localhost:27017/admindb".to_string());
+    mdb.register_database("my_sqlite".to_string(), "sqlite:///data/store.db".to_string());
+
+    let mut m = mdb.drivers.lock().unwrap();
+    
+    // Check types
+    assert!(m.get_mut("my_pg").unwrap().as_any_mut().downcast_mut::<bulldb::PostgresDriver>().is_some());
+    assert!(m.get_mut("my_mysql").unwrap().as_any_mut().downcast_mut::<bulldb::MySQLDriver>().is_some());
+    assert!(m.get_mut("my_mongo").unwrap().as_any_mut().downcast_mut::<bulldb::MongoDriver>().is_some());
+    assert!(m.get_mut("my_sqlite").unwrap().as_any_mut().downcast_mut::<bulldb::SQLiteMockDriver>().is_some());
+
+    // Postgres info
+    let pg_info = m.get("my_pg").unwrap().get_connection_info();
+    assert_eq!(pg_info.get("driver").unwrap(), "postgres");
+    assert_eq!(pg_info.get("host").unwrap(), "dbhost");
+    assert_eq!(pg_info.get("port").unwrap(), "5432");
+    assert_eq!(pg_info.get("database").unwrap(), "mydb");
+    assert_eq!(pg_info.get("username").unwrap(), "dbuser");
+
+    // MySQL info
+    let mysql_info = m.get("my_mysql").unwrap().get_connection_info();
+    assert_eq!(mysql_info.get("driver").unwrap(), "mysql");
+    assert_eq!(mysql_info.get("host").unwrap(), "127.0.0.1");
+    assert_eq!(mysql_info.get("port").unwrap(), "3306");
+    assert_eq!(mysql_info.get("database").unwrap(), "testdb");
+    assert_eq!(mysql_info.get("username").unwrap(), "root");
+
+    // Test connection
+    let test_res = m.get_mut("my_pg").unwrap().test_connection();
+    assert_eq!(test_res.get("success").unwrap(), "true");
+    assert_eq!(test_res.get("info_status").unwrap(), "CONNECTED");
+}
+
+

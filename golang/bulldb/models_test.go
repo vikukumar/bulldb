@@ -286,3 +286,48 @@ func TestGoSqliteAutoCreationAndConcurrency(t *testing.T) {
 		t.Errorf("expected %d rows, got %d", workerCount, len(countRows))
 	}
 }
+
+func TestGoOOPDriversAndConnectionInfo(t *testing.T) {
+	ctx := context.Background()
+	db := NewMultiDatabase()
+	db.RegisterDatabase("my_pg", "postgresql://dbuser:secretpass@dbhost:5432/mydb")
+	db.RegisterDatabase("my_mysql", "mysql://root:password123@127.0.0.1:3306/testdb")
+	db.RegisterDatabase("my_mongo", "mongodb://admin:pass@localhost:27017/admindb")
+	db.RegisterDatabase("my_sqlite", "sqlite:///data/store.db")
+
+	if _, ok := db.Drivers["my_pg"].(*PostgresDriver); !ok {
+		t.Errorf("expected PostgresDriver")
+	}
+	if _, ok := db.Drivers["my_mysql"].(*MySQLDriver); !ok {
+		t.Errorf("expected MySQLDriver")
+	}
+	if _, ok := db.Drivers["my_mongo"].(*MongoDriver); !ok {
+		t.Errorf("expected MongoDriver")
+	}
+	if _, ok := db.Drivers["my_sqlite"].(*SQLiteDriver); !ok {
+		t.Errorf("expected SQLiteDriver")
+	}
+
+	// Postgres connection info
+	pgInfo := db.Drivers["my_pg"].GetConnectionInfo()
+	if pgInfo["driver"] != "postgres" || pgInfo["host"] != "dbhost" || pgInfo["port"] != 5432 || pgInfo["database"] != "mydb" || pgInfo["username"] != "dbuser" {
+		t.Errorf("invalid Postgres connection info: %v", pgInfo)
+	}
+
+	// MySQL connection info
+	mysqlInfo := db.Drivers["my_mysql"].GetConnectionInfo()
+	if mysqlInfo["driver"] != "mysql" || mysqlInfo["host"] != "127.0.0.1" || mysqlInfo["port"] != 3306 || mysqlInfo["database"] != "testdb" || mysqlInfo["username"] != "root" {
+		t.Errorf("invalid MySQL connection info: %v", mysqlInfo)
+	}
+
+	// Connection test
+	testRes := db.Drivers["my_pg"].TestConnection(ctx)
+	if testRes["success"] != true {
+		t.Errorf("connection test failed: %v", testRes)
+	}
+	infoMap := testRes["info"].(map[string]interface{})
+	if infoMap["status"] != "CONNECTED" {
+		t.Errorf("expected status CONNECTED, got %s", infoMap["status"])
+	}
+}
+

@@ -176,6 +176,43 @@ namespace BullDB.Tests
             }
             catch {}
         }
+
+        [Fact]
+        public async Task TestOOPDriversAndConnectionInfo()
+        {
+            var db = new MultiDatabase();
+            db.RegisterDatabase("my_pg", "postgresql://dbuser:secretpass@dbhost:5432/mydb");
+            db.RegisterDatabase("my_mysql", "mysql://root:password123@127.0.0.1:3306/testdb");
+            db.RegisterDatabase("my_mongo", "mongodb://admin:pass@localhost:27017/admindb");
+            db.RegisterDatabase("my_sqlite", "sqlite:///data/store.db");
+
+            Assert.IsType<PostgresDriver>(db.Drivers["my_pg"]);
+            Assert.IsType<MySQLDriver>(db.Drivers["my_mysql"]);
+            Assert.IsType<MongoDriver>(db.Drivers["my_mongo"]);
+            Assert.IsType<SQLiteMockDriver>(db.Drivers["my_sqlite"]);
+
+            // Postgres info
+            var pgInfo = db.Drivers["my_pg"].GetConnectionInfo();
+            Assert.Equal("postgres", pgInfo["driver"]);
+            Assert.Equal("dbhost", pgInfo["host"]);
+            Assert.Equal(5432, pgInfo["port"]);
+            Assert.Equal("mydb", pgInfo["database"]);
+            Assert.Equal("dbuser", pgInfo["username"]);
+
+            // MySQL info
+            var mysqlInfo = db.Drivers["my_mysql"].GetConnectionInfo();
+            Assert.Equal("mysql", mysqlInfo["driver"]);
+            Assert.Equal("127.0.0.1", mysqlInfo["host"]);
+            Assert.Equal(3306, mysqlInfo["port"]);
+            Assert.Equal("testdb", mysqlInfo["database"]);
+            Assert.Equal("root", mysqlInfo["username"]);
+
+            // Connection testing
+            var testRes = await db.Drivers["my_pg"].TestConnectionAsync();
+            Assert.True((bool)testRes["success"]);
+            var innerInfo = (Dictionary<string, object>)testRes["info"];
+            Assert.Equal("CONNECTED", innerInfo["status"]);
+        }
     }
 }
 

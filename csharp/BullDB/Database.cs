@@ -17,6 +17,8 @@ namespace BullDB
         Task<Dictionary<string, object>> InsertAsync(string table, Dictionary<string, object> payload);
         Task<Dictionary<string, object>> UpdateAsync(string table, Dictionary<string, object> payload, Dictionary<string, object> filters);
         Task<bool> DeleteAsync(string table, Dictionary<string, object> filters);
+        Dictionary<string, object> GetConnectionInfo();
+        Task<Dictionary<string, object>> TestConnectionAsync();
     }
 
     public class CircuitBreaker
@@ -72,6 +74,10 @@ namespace BullDB
         private readonly CircuitBreaker _cb = new CircuitBreaker(5, TimeSpan.FromSeconds(10));
         private readonly object _lock = new object();
         public Dictionary<string, List<Dictionary<string, object>>> MockDb = new Dictionary<string, List<Dictionary<string, object>>>();
+        private string _status = "DISCONNECTED";
+        private DateTime _lastPingTime = DateTime.MinValue;
+        private bool _lastPingResult = false;
+        private Exception _lastError = null;
 
         public SQLiteMockDriver(string name, string dsn)
         {
@@ -120,13 +126,103 @@ namespace BullDB
                         }
                     }
                 }
+                _status = "CONNECTED";
             }
             return Task.CompletedTask;
         }
 
-        public Task DisconnectAsync() => Task.CompletedTask;
-        public Task<bool> PingAsync() => Task.FromResult(true);
-        public Task EnsureConnectedAsync() => Task.CompletedTask;
+        public Task DisconnectAsync()
+        {
+            lock (_lock)
+            {
+                _status = "DISCONNECTED";
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> PingAsync()
+        {
+            lock (_lock)
+            {
+                if (DateTime.UtcNow - _lastPingTime < TimeSpan.FromSeconds(1))
+                {
+                    return Task.FromResult(_lastPingResult);
+                }
+                bool res = _status == "CONNECTED";
+                _lastPingTime = DateTime.UtcNow;
+                _lastPingResult = res;
+                return Task.FromResult(res);
+            }
+        }
+
+        public async Task EnsureConnectedAsync()
+        {
+            if (!await PingAsync())
+            {
+                await ConnectAsync();
+            }
+        }
+
+        public Dictionary<string, object> GetConnectionInfo()
+        {
+            var cleanPath = _dsn;
+            if (cleanPath != null && cleanPath.StartsWith("sqlite://"))
+            {
+                cleanPath = cleanPath.Substring(9);
+                if (cleanPath.StartsWith("/:memory:"))
+                {
+                    cleanPath = cleanPath.Substring(1);
+                }
+                if (cleanPath.StartsWith("/"))
+                {
+                    if (cleanPath.Length > 2 && cleanPath[2] == ':' && char.IsLetter(cleanPath[1]))
+                    {
+                        cleanPath = cleanPath.Substring(1);
+                    }
+                    else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+                    {
+                        cleanPath = cleanPath.Substring(1);
+                    }
+                }
+                int qIdx = cleanPath.IndexOf('?');
+                if (qIdx != -1)
+                {
+                    cleanPath = cleanPath.Substring(0, qIdx);
+                }
+            }
+            return new Dictionary<string, object>
+            {
+                { "driver", "sqlite" },
+                { "path", string.IsNullOrEmpty(cleanPath) ? ":memory:" : cleanPath },
+                { "status", _status },
+                { "error_message", _lastError?.Message }
+            };
+        }
+
+        public async Task<Dictionary<string, object>> TestConnectionAsync()
+        {
+            try
+            {
+                await ConnectAsync();
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"Successfully connected to SQLite database" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+            catch (Exception ex)
+            {
+                _status = "ERROR";
+                _lastError = ex;
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "message", $"Failed to connect: {ex.Message}" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+        }
 
         public Task<List<Dictionary<string, object>>> ExecuteAsync(string query, params object[] args)
         {
@@ -265,6 +361,507 @@ namespace BullDB
         }
     }
 
+    public class PostgresDriver : IDatabaseDriver
+    {
+        public string Name { get; }
+        private readonly string _url;
+        private string _status = "DISCONNECTED";
+        private DateTime _lastPingTime = DateTime.MinValue;
+        private bool _lastPingResult = false;
+        private Exception _lastError = null;
+        private readonly object _lock = new object();
+
+        public PostgresDriver(string name, string url)
+        {
+            Name = name;
+            _url = url;
+        }
+
+        public Task ConnectAsync()
+        {
+            lock (_lock)
+            {
+                _status = "CONNECTED";
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task DisconnectAsync()
+        {
+            lock (_lock)
+            {
+                _status = "DISCONNECTED";
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> PingAsync()
+        {
+            lock (_lock)
+            {
+                if (DateTime.UtcNow - _lastPingTime < TimeSpan.FromSeconds(1))
+                {
+                    return Task.FromResult(_lastPingResult);
+                }
+                bool res = _status == "CONNECTED";
+                _lastPingTime = DateTime.UtcNow;
+                _lastPingResult = res;
+                return Task.FromResult(res);
+            }
+        }
+
+        public async Task EnsureConnectedAsync()
+        {
+            if (!await PingAsync())
+            {
+                await ConnectAsync();
+            }
+        }
+
+        public Task<List<Dictionary<string, object>>> ExecuteAsync(string query, params object[] args)
+        {
+            return Task.FromResult(new List<Dictionary<string, object>>());
+        }
+
+        public Task<Dictionary<string, object>> InsertAsync(string table, Dictionary<string, object> payload)
+        {
+            return Task.FromResult(payload);
+        }
+
+        public Task<Dictionary<string, object>> UpdateAsync(string table, Dictionary<string, object> payload, Dictionary<string, object> filters)
+        {
+            return Task.FromResult(payload);
+        }
+
+        public Task<bool> DeleteAsync(string table, Dictionary<string, object> filters)
+        {
+            return Task.FromResult(true);
+        }
+
+        private Dictionary<string, object> ParseUrl()
+        {
+            string host = "localhost";
+            int port = 5432;
+            string database = "postgres";
+            string username = "postgres";
+
+            try
+            {
+                string cleaned = _url.Replace("postgresql://", "").Replace("postgres://", "");
+                var slashParts = cleaned.Split('/');
+                if (slashParts.Length > 1)
+                {
+                    string dbPart = slashParts[1];
+                    int qIdx = dbPart.IndexOf('?');
+                    if (qIdx != -1) dbPart = dbPart.Substring(0, qIdx);
+                    database = dbPart;
+                }
+
+                string authHost = slashParts[0];
+                string auth = "";
+                string hostPort = authHost;
+                int atIdx = authHost.LastIndexOf('@');
+                if (atIdx != -1)
+                {
+                    auth = authHost.Substring(0, atIdx);
+                    hostPort = authHost.Substring(atIdx + 1);
+                }
+
+                if (!string.IsNullOrEmpty(auth))
+                {
+                    username = auth.Split(':')[0];
+                }
+
+                if (!string.IsNullOrEmpty(hostPort))
+                {
+                    var hpParts = hostPort.Split(':');
+                    host = hpParts[0];
+                    if (hpParts.Length > 1)
+                    {
+                        int.TryParse(hpParts[1], out port);
+                    }
+                }
+            }
+            catch {}
+
+            return new Dictionary<string, object>
+            {
+                { "host", host },
+                { "port", port },
+                { "database", database },
+                { "username", username }
+            };
+        }
+
+        public Dictionary<string, object> GetConnectionInfo()
+        {
+            var info = ParseUrl();
+            info["driver"] = "postgres";
+            info["status"] = _status;
+            info["error_message"] = _lastError?.Message;
+            return info;
+        }
+
+        public async Task<Dictionary<string, object>> TestConnectionAsync()
+        {
+            try
+            {
+                await ConnectAsync();
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"Successfully simulated connection to PostgreSQL" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+            catch (Exception ex)
+            {
+                _status = "ERROR";
+                _lastError = ex;
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "message", $"Failed to connect: {ex.Message}" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+        }
+    }
+
+    public class MySQLDriver : IDatabaseDriver
+    {
+        public string Name { get; }
+        private readonly string _url;
+        private string _status = "DISCONNECTED";
+        private DateTime _lastPingTime = DateTime.MinValue;
+        private bool _lastPingResult = false;
+        private Exception _lastError = null;
+        private readonly object _lock = new object();
+
+        public MySQLDriver(string name, string url)
+        {
+            Name = name;
+            _url = url;
+        }
+
+        public Task ConnectAsync()
+        {
+            lock (_lock)
+            {
+                _status = "CONNECTED";
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task DisconnectAsync()
+        {
+            lock (_lock)
+            {
+                _status = "DISCONNECTED";
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> PingAsync()
+        {
+            lock (_lock)
+            {
+                if (DateTime.UtcNow - _lastPingTime < TimeSpan.FromSeconds(1))
+                {
+                    return Task.FromResult(_lastPingResult);
+                }
+                bool res = _status == "CONNECTED";
+                _lastPingTime = DateTime.UtcNow;
+                _lastPingResult = res;
+                return Task.FromResult(res);
+            }
+        }
+
+        public async Task EnsureConnectedAsync()
+        {
+            if (!await PingAsync())
+            {
+                await ConnectAsync();
+            }
+        }
+
+        public Task<List<Dictionary<string, object>>> ExecuteAsync(string query, params object[] args)
+        {
+            return Task.FromResult(new List<Dictionary<string, object>>());
+        }
+
+        public Task<Dictionary<string, object>> InsertAsync(string table, Dictionary<string, object> payload)
+        {
+            return Task.FromResult(payload);
+        }
+
+        public Task<Dictionary<string, object>> UpdateAsync(string table, Dictionary<string, object> payload, Dictionary<string, object> filters)
+        {
+            return Task.FromResult(payload);
+        }
+
+        public Task<bool> DeleteAsync(string table, Dictionary<string, object> filters)
+        {
+            return Task.FromResult(true);
+        }
+
+        private Dictionary<string, object> ParseUrl()
+        {
+            string host = "localhost";
+            int port = 3306;
+            string database = "mysql";
+            string username = "root";
+
+            try
+            {
+                string cleaned = _url.Replace("mysql://", "").Replace("mysqls://", "");
+                var slashParts = cleaned.Split('/');
+                if (slashParts.Length > 1)
+                {
+                    string dbPart = slashParts[1];
+                    int qIdx = dbPart.IndexOf('?');
+                    if (qIdx != -1) dbPart = dbPart.Substring(0, qIdx);
+                    database = dbPart;
+                }
+
+                string authHost = slashParts[0];
+                string auth = "";
+                string hostPort = authHost;
+                int atIdx = authHost.LastIndexOf('@');
+                if (atIdx != -1)
+                {
+                    auth = authHost.Substring(0, atIdx);
+                    hostPort = authHost.Substring(atIdx + 1);
+                }
+
+                if (!string.IsNullOrEmpty(auth))
+                {
+                    username = auth.Split(':')[0];
+                }
+
+                if (!string.IsNullOrEmpty(hostPort))
+                {
+                    var hpParts = hostPort.Split(':');
+                    host = hpParts[0];
+                    if (hpParts.Length > 1)
+                    {
+                        int.TryParse(hpParts[1], out port);
+                    }
+                }
+            }
+            catch {}
+
+            return new Dictionary<string, object>
+            {
+                { "host", host },
+                { "port", port },
+                { "database", database },
+                { "username", username }
+            };
+        }
+
+        public Dictionary<string, object> GetConnectionInfo()
+        {
+            var info = ParseUrl();
+            info["driver"] = "mysql";
+            info["status"] = _status;
+            info["error_message"] = _lastError?.Message;
+            return info;
+        }
+
+        public async Task<Dictionary<string, object>> TestConnectionAsync()
+        {
+            try
+            {
+                await ConnectAsync();
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"Successfully simulated connection to MySQL" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+            catch (Exception ex)
+            {
+                _status = "ERROR";
+                _lastError = ex;
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "message", $"Failed to connect: {ex.Message}" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+        }
+    }
+
+    public class MongoDriver : IDatabaseDriver
+    {
+        public string Name { get; }
+        private readonly string _url;
+        private string _status = "DISCONNECTED";
+        private DateTime _lastPingTime = DateTime.MinValue;
+        private bool _lastPingResult = false;
+        private Exception _lastError = null;
+        private readonly object _lock = new object();
+
+        public MongoDriver(string name, string url)
+        {
+            Name = name;
+            _url = url;
+        }
+
+        public Task ConnectAsync()
+        {
+            lock (_lock)
+            {
+                _status = "CONNECTED";
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task DisconnectAsync()
+        {
+            lock (_lock)
+            {
+                _status = "DISCONNECTED";
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> PingAsync()
+        {
+            lock (_lock)
+            {
+                if (DateTime.UtcNow - _lastPingTime < TimeSpan.FromSeconds(1))
+                {
+                    return Task.FromResult(_lastPingResult);
+                }
+                bool res = _status == "CONNECTED";
+                _lastPingTime = DateTime.UtcNow;
+                _lastPingResult = res;
+                return Task.FromResult(res);
+            }
+        }
+
+        public async Task EnsureConnectedAsync()
+        {
+            if (!await PingAsync())
+            {
+                await ConnectAsync();
+            }
+        }
+
+        public Task<List<Dictionary<string, object>>> ExecuteAsync(string query, params object[] args)
+        {
+            return Task.FromResult(new List<Dictionary<string, object>>());
+        }
+
+        public Task<Dictionary<string, object>> InsertAsync(string table, Dictionary<string, object> payload)
+        {
+            return Task.FromResult(payload);
+        }
+
+        public Task<Dictionary<string, object>> UpdateAsync(string table, Dictionary<string, object> payload, Dictionary<string, object> filters)
+        {
+            return Task.FromResult(payload);
+        }
+
+        public Task<bool> DeleteAsync(string table, Dictionary<string, object> filters)
+        {
+            return Task.FromResult(true);
+        }
+
+        private Dictionary<string, object> ParseUrl()
+        {
+            string host = "localhost";
+            int port = 27017;
+            string database = "admin";
+            string username = "";
+
+            try
+            {
+                string cleaned = _url.Replace("mongodb://", "").Replace("mongodb+srv://", "");
+                var slashParts = cleaned.Split('/');
+                if (slashParts.Length > 1)
+                {
+                    string dbPart = slashParts[1];
+                    int qIdx = dbPart.IndexOf('?');
+                    if (qIdx != -1) dbPart = dbPart.Substring(0, qIdx);
+                    database = dbPart;
+                }
+
+                string authHost = slashParts[0];
+                string auth = "";
+                string hostPort = authHost;
+                int atIdx = authHost.LastIndexOf('@');
+                if (atIdx != -1)
+                {
+                    auth = authHost.Substring(0, atIdx);
+                    hostPort = authHost.Substring(atIdx + 1);
+                }
+
+                if (!string.IsNullOrEmpty(auth))
+                {
+                    username = auth.Split(':')[0];
+                }
+
+                if (!string.IsNullOrEmpty(hostPort))
+                {
+                    var hpParts = hostPort.Split(':');
+                    host = hpParts[0];
+                    if (hpParts.Length > 1)
+                    {
+                        int.TryParse(hpParts[1], out port);
+                    }
+                }
+            }
+            catch {}
+
+            return new Dictionary<string, object>
+            {
+                { "host", host },
+                { "port", port },
+                { "database", database },
+                { "username", username }
+            };
+        }
+
+        public Dictionary<string, object> GetConnectionInfo()
+        {
+            var info = ParseUrl();
+            info["driver"] = "mongo";
+            info["status"] = _status;
+            info["error_message"] = _lastError?.Message;
+            return info;
+        }
+
+        public async Task<Dictionary<string, object>> TestConnectionAsync()
+        {
+            try
+            {
+                await ConnectAsync();
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "message", $"Successfully simulated connection to MongoDB" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+            catch (Exception ex)
+            {
+                _status = "ERROR";
+                _lastError = ex;
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "message", $"Failed to connect: {ex.Message}" },
+                    { "info", GetConnectionInfo() }
+                };
+            }
+        }
+    }
+
     public class MultiDatabase
     {
         public Dictionary<string, IDatabaseDriver> Drivers { get; } = new Dictionary<string, IDatabaseDriver>();
@@ -277,7 +874,26 @@ namespace BullDB
 
         public void RegisterDatabase(string name, string connStr)
         {
-            Drivers[name] = new SQLiteMockDriver(name, connStr);
+            if (connStr.StartsWith("sqlite"))
+            {
+                Drivers[name] = new SQLiteMockDriver(name, connStr);
+            }
+            else if (connStr.StartsWith("mongodb") || connStr.StartsWith("mongo"))
+            {
+                Drivers[name] = new MongoDriver(name, connStr);
+            }
+            else if (connStr.StartsWith("postgresql") || connStr.StartsWith("postgres"))
+            {
+                Drivers[name] = new PostgresDriver(name, connStr);
+            }
+            else if (connStr.StartsWith("mysql"))
+            {
+                Drivers[name] = new MySQLDriver(name, connStr);
+            }
+            else
+            {
+                Drivers[name] = new SQLiteMockDriver(name, connStr); // fallback
+            }
         }
 
         public async Task ConnectAllAsync()

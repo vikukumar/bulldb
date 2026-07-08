@@ -45,9 +45,29 @@ export abstract class DatabaseDriver {
   public circuitBreaker = new CircuitBreaker();
   constructor(public name: string, public urlStr: string) {}
 
+  public lastPingTime = 0;
+  public lastPingResult = false;
+
   abstract connect(): Promise<void>;
   abstract disconnect(): Promise<void>;
-  abstract ping(): Promise<boolean>;
+  
+  async ping(): Promise<boolean> {
+    if (Date.now() - this.lastPingTime < 1000) {
+      return this.lastPingResult;
+    }
+    try {
+      const res = await this._ping();
+      this.lastPingTime = Date.now();
+      this.lastPingResult = res;
+      return res;
+    } catch (err) {
+      this.lastPingTime = Date.now();
+      this.lastPingResult = false;
+      return false;
+    }
+  }
+
+  abstract _ping(): Promise<boolean>;
   abstract execute(query: string, params?: any[]): Promise<any[]>;
   abstract insert(table: string, payload: Record<string, any>): Promise<any>;
   abstract update(table: string, payload: Record<string, any>, filters: Record<string, any>): Promise<any>;
@@ -104,7 +124,7 @@ export abstract class SQLMockDriver extends DatabaseDriver {
     this.connectionStatus = "DISCONNECTED";
   }
 
-  async ping(): Promise<boolean> {
+  async _ping(): Promise<boolean> {
     return this.connectionStatus === "CONNECTED";
   }
 
@@ -563,7 +583,7 @@ export class MongoDriver extends DatabaseDriver {
     this.connectionStatus = "DISCONNECTED";
   }
 
-  async ping(): Promise<boolean> {
+  async _ping(): Promise<boolean> {
     return this.connectionStatus === "CONNECTED";
   }
 

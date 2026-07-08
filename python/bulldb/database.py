@@ -49,6 +49,10 @@ class DatabaseDriver:
         self.url = url
         self.parsed_url = urllib.parse.urlparse(url)
         self.circuit_breaker = CircuitBreaker()
+        self.last_ping_time = 0.0
+        self.last_ping_result = False
+        self.connection_status = "DISCONNECTED"
+        self.last_error = None
 
     async def connect(self):
         pass
@@ -57,6 +61,18 @@ class DatabaseDriver:
         pass
 
     async def ping(self) -> bool:
+        import time
+        if time.time() - self.last_ping_time < 1.0:
+            return self.last_ping_result
+        try:
+            res = await self._ping()
+        except Exception:
+            res = False
+        self.last_ping_time = time.time()
+        self.last_ping_result = res
+        return res
+
+    async def _ping(self) -> bool:
         return True
 
     async def ensure_connected(self):
@@ -65,6 +81,31 @@ class DatabaseDriver:
                 await self.connect()
         except Exception:
             await self.connect()
+
+    def get_connection_info(self) -> dict:
+        return {
+            "driver": self.name,
+            "status": self.connection_status,
+            "error_message": str(self.last_error) if self.last_error else None
+        }
+
+    async def test_connection(self) -> dict:
+        try:
+            await self.connect()
+            info = self.get_connection_info()
+            return {
+                "success": True,
+                "message": f"Successfully connected with driver {self.name}",
+                "info": info
+            }
+        except Exception as e:
+            self.connection_status = "ERROR"
+            self.last_error = e
+            return {
+                "success": False,
+                "message": f"Connection test failed: {str(e)}",
+                "info": self.get_connection_info()
+            }
 
     async def execute(self, query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
         return []
@@ -79,11 +120,6 @@ class DatabaseDriver:
         return {}
 
     async def execute_mongo_find(self, collection: str, filters: Dict[str, Any], projection: Dict[str, Any], limit: Optional[int]) -> List[Dict[str, Any]]:
-        if hasattr(self, "db") and not isinstance(self.db, dict):
-            cursor = self.db[collection].find(filters, projection)
-            if limit:
-                cursor = cursor.limit(limit)
-            return list(cursor)
         return []
 
     async def execute_search(self, index: str, body: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
@@ -140,6 +176,7 @@ class SQLiteDriver(DatabaseDriver):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
+        self.connection_status = "CONNECTED"
 
     async def disconnect(self):
         async with self.lock:
@@ -151,10 +188,7 @@ class SQLiteDriver(DatabaseDriver):
                 self.conn.close()
             except Exception:
                 pass
-
-    async def ping(self) -> bool:
-        async with self.lock:
-            return await self._ping()
+        self.connection_status = "DISCONNECTED"
 
     async def _ping(self) -> bool:
         try:
@@ -171,10 +205,44 @@ class SQLiteDriver(DatabaseDriver):
 
     async def _ensure_connected(self):
         try:
-            if not await self._ping():
+            if not await self.ping():
                 await self._connect()
         except Exception:
             await self._connect()
+
+    def get_connection_info(self) -> dict:
+        db_path = self.parsed_url.path
+        if self.url.startswith("sqlite://"):
+            db_path = self.url[9:]
+            if db_path.startswith("/"):
+                db_path = db_path[1:]
+            if "?" in db_path:
+                db_path = db_path.split("?")[0]
+        db_path = db_path or ":memory:"
+        return {
+            "driver": "sqlite",
+            "path": db_path,
+            "status": self.connection_status,
+            "error_message": str(self.last_error) if self.last_error else None
+        }
+
+    async def test_connection(self) -> dict:
+        try:
+            await self.connect()
+            info = self.get_connection_info()
+            return {
+                "success": True,
+                "message": f"Successfully connected to SQLite database at {info['path']}",
+                "info": info
+            }
+        except Exception as e:
+            self.connection_status = "ERROR"
+            self.last_error = e
+            return {
+                "success": False,
+                "message": f"Failed to connect to SQLite: {str(e)}",
+                "info": self.get_connection_info()
+            }
 
     async def execute(self, query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
         if not self.circuit_breaker.allow_request():
@@ -215,9 +283,138 @@ class SQLiteDriver(DatabaseDriver):
         await self.execute(query, tuple(filters.values()))
         return True
 
+class PostgresDriver(DatabaseDriver):
+    async def connect(self):
+        self.connection_status = "CONNECTED"
+
+    async def disconnect(self):
+        self.connection_status = "DISCONNECTED"
+
+    async def _ping(self) -> bool:
+        return self.connection_status == "CONNECTED"
+
+    def _parse_url(self) -> dict:
+        try:
+            cleaned = self.url.replace("postgresql://", "").replace("postgres://", "")
+            auth_host, _, db_part = cleaned.partition("/")
+            auth, _, host_port = auth_host.rpartition("@")
+            if not auth:
+                auth = host_port
+                host_port = auth_host
+            host, _, port_str = host_port.partition(":")
+            username = auth.split(":")[0] if auth else "postgres"
+            database = db_part.split("?")[0] if db_part else "postgres"
+            return {
+                "host": host or "localhost",
+                "port": int(port_str) if port_str.isdigit() else 5432,
+                "database": database or "postgres",
+                "username": username or "postgres"
+            }
+        except Exception:
+            return {
+                "host": "localhost",
+                "port": 5432,
+                "database": "postgres",
+                "username": "postgres"
+            }
+
+    def get_connection_info(self) -> dict:
+        info = self._parse_url()
+        return {
+            "driver": "postgres",
+            "host": info["host"],
+            "port": info["port"],
+            "database": info["database"],
+            "username": info["username"],
+            "status": self.connection_status,
+            "error_message": str(self.last_error) if self.last_error else None
+        }
+
+    async def test_connection(self) -> dict:
+        try:
+            await self.connect()
+            info = self.get_connection_info()
+            return {
+                "success": True,
+                "message": f"Successfully simulated connection to PostgreSQL at {info['host']}:{info['port']}",
+                "info": info
+            }
+        except Exception as e:
+            self.connection_status = "ERROR"
+            self.last_error = e
+            return {
+                "success": False,
+                "message": f"Failed to connect to PostgreSQL: {str(e)}",
+                "info": self.get_connection_info()
+            }
+
+class MySQLDriver(DatabaseDriver):
+    async def connect(self):
+        self.connection_status = "CONNECTED"
+
+    async def disconnect(self):
+        self.connection_status = "DISCONNECTED"
+
+    async def _ping(self) -> bool:
+        return self.connection_status == "CONNECTED"
+
+    def _parse_url(self) -> dict:
+        try:
+            cleaned = self.url.replace("mysql://", "").replace("mysqls://", "")
+            auth_host, _, db_part = cleaned.partition("/")
+            auth, _, host_port = auth_host.rpartition("@")
+            if not auth:
+                auth = host_port
+                host_port = auth_host
+            host, _, port_str = host_port.partition(":")
+            username = auth.split(":")[0] if auth else "root"
+            database = db_part.split("?")[0] if db_part else "mysql"
+            return {
+                "host": host or "localhost",
+                "port": int(port_str) if port_str.isdigit() else 3306,
+                "database": database or "mysql",
+                "username": username or "root"
+            }
+        except Exception:
+            return {
+                "host": "localhost",
+                "port": 3306,
+                "database": "mysql",
+                "username": "root"
+            }
+
+    def get_connection_info(self) -> dict:
+        info = self._parse_url()
+        return {
+            "driver": "mysql",
+            "host": info["host"],
+            "port": info["port"],
+            "database": info["database"],
+            "username": info["username"],
+            "status": self.connection_status,
+            "error_message": str(self.last_error) if self.last_error else None
+        }
+
+    async def test_connection(self) -> dict:
+        try:
+            await self.connect()
+            info = self.get_connection_info()
+            return {
+                "success": True,
+                "message": f"Successfully simulated connection to MySQL at {info['host']}:{info['port']}",
+                "info": info
+            }
+        except Exception as e:
+            self.connection_status = "ERROR"
+            self.last_error = e
+            return {
+                "success": False,
+                "message": f"Failed to connect to MySQL: {str(e)}",
+                "info": self.get_connection_info()
+            }
+
 class MongoDriver(DatabaseDriver):
     async def connect(self):
-        # Dynamically import pymongo
         try:
             from pymongo import MongoClient
             if hasattr(self, "client") and self.client:
@@ -229,8 +426,8 @@ class MongoDriver(DatabaseDriver):
             db_name = self.parsed_url.path.strip("/") or "bulldb"
             self.db = self.client[db_name]
         except ImportError:
-            # Fallback mock for testing in case pymongo isn't installed
             self.db = {}
+        self.connection_status = "CONNECTED"
 
     async def disconnect(self):
         if hasattr(self, "client") and self.client:
@@ -238,14 +435,70 @@ class MongoDriver(DatabaseDriver):
                 self.client.close()
             except Exception:
                 pass
+        self.connection_status = "DISCONNECTED"
 
-    async def ping(self) -> bool:
+    async def _ping(self) -> bool:
         if isinstance(self.db, dict): return True
         try:
             self.client.admin.command('ping')
             return True
         except Exception:
             return False
+
+    def _parse_url(self) -> dict:
+        try:
+            cleaned = self.url.replace("mongodb://", "").replace("mongodb+srv://", "")
+            auth_host, _, db_part = cleaned.partition("/")
+            auth, _, host_port = auth_host.rpartition("@")
+            if not auth:
+                auth = host_port
+                host_port = auth_host
+            host, _, port_str = host_port.partition(":")
+            username = auth.split(":")[0] if auth else ""
+            database = db_part.split("?")[0] if db_part else "admin"
+            return {
+                "host": host or "localhost",
+                "port": int(port_str) if port_str.isdigit() else 27017,
+                "database": database or "admin",
+                "username": username
+            }
+        except Exception:
+            return {
+                "host": "localhost",
+                "port": 27017,
+                "database": "admin",
+                "username": ""
+            }
+
+    def get_connection_info(self) -> dict:
+        info = self._parse_url()
+        return {
+            "driver": "mongo",
+            "host": info["host"],
+            "port": info["port"],
+            "database": info["database"],
+            "username": info["username"],
+            "status": self.connection_status,
+            "error_message": str(self.last_error) if self.last_error else None
+        }
+
+    async def test_connection(self) -> dict:
+        try:
+            await self.connect()
+            info = self.get_connection_info()
+            return {
+                "success": True,
+                "message": f"Successfully connected to MongoDB at {info['host']}:{info['port']}",
+                "info": info
+            }
+        except Exception as e:
+            self.connection_status = "ERROR"
+            self.last_error = e
+            return {
+                "success": False,
+                "message": f"Failed to connect to MongoDB: {str(e)}",
+                "info": self.get_connection_info()
+            }
 
     async def insert(self, table: str, payload: Dict[str, Any]) -> Any:
         if isinstance(self.db, dict): return payload
@@ -294,10 +547,14 @@ class MultiDatabase:
     def register_database(self, name: str, url: str, is_replica: bool = False, shard_key: Optional[str] = None):
         if url.startswith("sqlite"):
             driver = SQLiteDriver(name, url)
-        elif url.startswith("mongodb"):
+        elif url.startswith("mongodb") or url.startswith("mongo"):
             driver = MongoDriver(name, url)
+        elif url.startswith("postgresql") or url.startswith("postgres"):
+            driver = PostgresDriver(name, url)
+        elif url.startswith("mysql"):
+            driver = MySQLDriver(name, url)
         else:
-            driver = DatabaseDriver(name, url) # Generic wrapper
+            driver = SQLiteDriver(name, url) # Fallback
 
         self.drivers[name] = driver
         if is_replica:

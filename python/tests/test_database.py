@@ -62,3 +62,41 @@ async def test_sqlite_auto_creation_and_concurrency(tmp_path):
     assert rows[0]["count"] == 50
     await driver.disconnect()
 
+
+@pytest.mark.asyncio
+async def test_oop_drivers_and_connection_info():
+    from bulldb.database import MultiDatabase, PostgresDriver, MySQLDriver, MongoDriver, SQLiteDriver
+
+    db = MultiDatabase()
+    db.register_database("my_pg", "postgresql://dbuser:secretpass@dbhost:5432/mydb")
+    db.register_database("my_mysql", "mysql://root:password123@127.0.0.1:3306/testdb")
+    db.register_database("my_mongo", "mongodb://admin:pass@localhost:27017/admindb")
+    db.register_database("my_sqlite", "sqlite:///data/store.db")
+
+    assert isinstance(db.drivers["my_pg"], PostgresDriver)
+    assert isinstance(db.drivers["my_mysql"], MySQLDriver)
+    assert isinstance(db.drivers["my_mongo"], MongoDriver)
+    assert isinstance(db.drivers["my_sqlite"], SQLiteDriver)
+
+    # Postgres Info
+    pg_info = db.drivers["my_pg"].get_connection_info()
+    assert pg_info["driver"] == "postgres"
+    assert pg_info["host"] == "dbhost"
+    assert pg_info["port"] == 5432
+    assert pg_info["database"] == "mydb"
+    assert pg_info["username"] == "dbuser"
+
+    # MySQL Info
+    mysql_info = db.drivers["my_mysql"].get_connection_info()
+    assert mysql_info["driver"] == "mysql"
+    assert mysql_info["host"] == "127.0.0.1"
+    assert mysql_info["port"] == 3306
+    assert mysql_info["database"] == "testdb"
+    assert mysql_info["username"] == "root"
+
+    # Test connection
+    test_res = await db.drivers["my_pg"].test_connection()
+    assert test_res["success"] is True
+    assert test_res["info"]["status"] == "CONNECTED"
+
+

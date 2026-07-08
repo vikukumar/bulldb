@@ -27,6 +27,8 @@ type DatabaseDriver interface {
 	Update(ctx context.Context, table string, payload map[string]interface{}, filters map[string]interface{}) (map[string]interface{}, error)
 	Delete(ctx context.Context, table string, filters map[string]interface{}) (bool, error)
 	GetName() string
+	GetConnectionInfo() map[string]interface{}
+	TestConnection(ctx context.Context) map[string]interface{}
 }
 
 type CircuitBreaker struct {
@@ -86,14 +88,19 @@ type SQLiteDriver struct {
 	URL            string
 	db             *sql.DB
 	circuitBreaker *CircuitBreaker
+	lastPingTime   time.Time
+	lastPingResult bool
+	connectionStatus string
+	lastError      error
 	mu             sync.Mutex
 }
 
 func NewSQLiteDriver(name, dsn string) *SQLiteDriver {
 	return &SQLiteDriver{
-		Name:           name,
-		URL:            dsn,
-		circuitBreaker: NewCircuitBreaker(5, 10*time.Second),
+		Name:             name,
+		URL:              dsn,
+		circuitBreaker:   NewCircuitBreaker(5, 10*time.Second),
+		connectionStatus: "DISCONNECTED",
 	}
 }
 
@@ -109,25 +116,38 @@ func (d *SQLiteDriver) Disconnect(ctx context.Context) error {
 	if d.db != nil {
 		err := d.db.Close()
 		d.db = nil
+		d.connectionStatus = "DISCONNECTED"
 		return err
 	}
+	d.connectionStatus = "DISCONNECTED"
 	return nil
 }
 
 func (d *SQLiteDriver) Ping(ctx context.Context) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.db == nil {
-		return false
+	if time.Since(d.lastPingTime) < 1*time.Second {
+		return d.lastPingResult
 	}
-	return d.db.PingContext(ctx) == nil
+	res := false
+	if d.db != nil {
+		res = d.db.PingContext(ctx) == nil
+	}
+	d.lastPingTime = time.Now()
+	d.lastPingResult = res
+	return res
 }
 
 func (d *SQLiteDriver) EnsureConnected(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.db != nil {
+		if time.Since(d.lastPingTime) < 1*time.Second && d.lastPingResult {
+			return nil
+		}
 		if d.db.PingContext(ctx) == nil {
+			d.lastPingTime = time.Now()
+			d.lastPingResult = true
 			return nil
 		}
 		_ = d.db.Close()
@@ -157,10 +177,52 @@ func (d *SQLiteDriver) EnsureConnected(ctx context.Context) error {
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
+		d.connectionStatus = "ERROR"
+		d.lastError = err
 		return err
 	}
 	d.db = db
+	d.connectionStatus = "CONNECTED"
 	return nil
+}
+
+func (d *SQLiteDriver) GetConnectionInfo() map[string]interface{} {
+	dsn := strings.TrimPrefix(d.URL, "sqlite://")
+	if dsn == ":memory:" || dsn == "" {
+		dsn = ":memory:"
+	}
+	status := "DISCONNECTED"
+	d.mu.Lock()
+	if d.db != nil {
+		status = "CONNECTED"
+	}
+	d.mu.Unlock()
+
+	errMsg := ""
+	if d.lastError != nil {
+		errMsg = d.lastError.Error()
+	}
+
+	return map[string]interface{}{
+		"driver":        "sqlite",
+		"path":          dsn,
+		"status":        status,
+		"error_message": errMsg,
+	}
+}
+
+func (d *SQLiteDriver) TestConnection(ctx context.Context) map[string]interface{} {
+	err := d.Connect(ctx)
+	success := err == nil
+	msg := "Successfully connected to SQLite database"
+	if err != nil {
+		msg = err.Error()
+	}
+	return map[string]interface{}{
+		"success": success,
+		"message": msg,
+		"info":    d.GetConnectionInfo(),
+	}
 }
 
 func (d *SQLiteDriver) Execute(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
@@ -279,15 +341,39 @@ func (d *SQLiteDriver) Delete(ctx context.Context, table string, filters map[str
 }
 
 type MongoDriver struct {
-	Name string
-	URL  string
+	Name           string
+	URL            string
+	status         string
+	lastPingTime   time.Time
+	lastPingResult bool
+	mu             sync.Mutex
 }
 
-func (d *MongoDriver) GetName() string                           { return d.Name }
-func (d *MongoDriver) Connect(ctx context.Context) error         { return nil }
-func (d *MongoDriver) Disconnect(ctx context.Context) error      { return nil }
-func (d *MongoDriver) Ping(ctx context.Context) bool             { return true }
-func (d *MongoDriver) EnsureConnected(ctx context.Context) error { return nil }
+func (d *MongoDriver) GetName() string                   { return d.Name }
+func (d *MongoDriver) Connect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.status = "CONNECTED"
+	return nil
+}
+func (d *MongoDriver) Disconnect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.status = "DISCONNECTED"
+	return nil
+}
+func (d *MongoDriver) Ping(ctx context.Context) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if time.Since(d.lastPingTime) < 1*time.Second {
+		return d.lastPingResult
+	}
+	res := d.status == "CONNECTED"
+	d.lastPingTime = time.Now()
+	d.lastPingResult = res
+	return res
+}
+func (d *MongoDriver) EnsureConnected(ctx context.Context) error { return d.Connect(ctx) }
 func (d *MongoDriver) Execute(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
 	return nil, nil
 }
@@ -299,6 +385,343 @@ func (d *MongoDriver) Update(ctx context.Context, table string, payload map[stri
 }
 func (d *MongoDriver) Delete(ctx context.Context, table string, filters map[string]interface{}) (bool, error) {
 	return true, nil
+}
+
+func (d *MongoDriver) parseURL() map[string]interface{} {
+	host := "localhost"
+	port := 27017
+	database := "admin"
+	username := ""
+
+	cleaned := strings.TrimPrefix(d.URL, "mongodb://")
+	cleaned = strings.TrimPrefix(cleaned, "mongodb+srv://")
+
+	parts := strings.Split(cleaned, "/")
+	if len(parts) > 1 {
+		dbPart := parts[1]
+		if idx := strings.Index(dbPart, "?"); idx != -1 {
+			dbPart = dbPart[:idx]
+		}
+		database = dbPart
+	}
+
+	authHost := parts[0]
+	var auth, hostPort string
+	if idx := strings.LastIndex(authHost, "@"); idx != -1 {
+		auth = authHost[:idx]
+		hostPort = authHost[idx+1:]
+	} else {
+		hostPort = authHost
+	}
+
+	if auth != "" {
+		username = strings.Split(auth, ":")[0]
+	}
+
+	if hostPort != "" {
+		hostParts := strings.Split(hostPort, ":")
+		host = hostParts[0]
+		if len(hostParts) > 1 {
+			fmt.Sscanf(hostParts[1], "%d", &port)
+		}
+	}
+
+	return map[string]interface{}{
+		"host":     host,
+		"port":     port,
+		"database": database,
+		"username": username,
+	}
+}
+
+func (d *MongoDriver) GetConnectionInfo() map[string]interface{} {
+	info := d.parseURL()
+	info["driver"] = "mongo"
+	info["status"] = d.status
+	return info
+}
+
+func (d *MongoDriver) TestConnection(ctx context.Context) map[string]interface{} {
+	err := d.Connect(ctx)
+	success := err == nil
+	info := d.GetConnectionInfo()
+	msg := "Successfully simulated connection to MongoDB"
+	if err != nil {
+		msg = err.Error()
+	}
+	return map[string]interface{}{
+		"success": success,
+		"message": msg,
+		"info":    info,
+	}
+}
+
+type PostgresDriver struct {
+	Name             string
+	URL              string
+	status           string
+	lastPingTime     time.Time
+	lastPingResult   bool
+	mu               sync.Mutex
+}
+
+func NewPostgresDriver(name, urlStr string) *PostgresDriver {
+	return &PostgresDriver{
+		Name:   name,
+		URL:    urlStr,
+		status: "DISCONNECTED",
+	}
+}
+
+func (d *PostgresDriver) GetName() string { return d.Name }
+
+func (d *PostgresDriver) Connect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.status = "CONNECTED"
+	return nil
+}
+
+func (d *PostgresDriver) Disconnect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.status = "DISCONNECTED"
+	return nil
+}
+
+func (d *PostgresDriver) Ping(ctx context.Context) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if time.Since(d.lastPingTime) < 1*time.Second {
+		return d.lastPingResult
+	}
+	res := d.status == "CONNECTED"
+	d.lastPingTime = time.Now()
+	d.lastPingResult = res
+	return res
+}
+
+func (d *PostgresDriver) EnsureConnected(ctx context.Context) error {
+	if !d.Ping(ctx) {
+		return d.Connect(ctx)
+	}
+	return nil
+}
+
+func (d *PostgresDriver) Execute(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+func (d *PostgresDriver) Insert(ctx context.Context, table string, payload map[string]interface{}) (map[string]interface{}, error) {
+	return payload, nil
+}
+func (d *PostgresDriver) Update(ctx context.Context, table string, payload map[string]interface{}, filters map[string]interface{}) (map[string]interface{}, error) {
+	return payload, nil
+}
+func (d *PostgresDriver) Delete(ctx context.Context, table string, filters map[string]interface{}) (bool, error) {
+	return true, nil
+}
+
+func (d *PostgresDriver) parseURL() map[string]interface{} {
+	host := "localhost"
+	port := 5432
+	database := "postgres"
+	username := "postgres"
+
+	cleaned := strings.TrimPrefix(d.URL, "postgresql://")
+	cleaned = strings.TrimPrefix(cleaned, "postgres://")
+
+	parts := strings.Split(cleaned, "/")
+	if len(parts) > 1 {
+		dbPart := parts[1]
+		if idx := strings.Index(dbPart, "?"); idx != -1 {
+			dbPart = dbPart[:idx]
+		}
+		database = dbPart
+	}
+
+	authHost := parts[0]
+	var auth, hostPort string
+	if idx := strings.LastIndex(authHost, "@"); idx != -1 {
+		auth = authHost[:idx]
+		hostPort = authHost[idx+1:]
+	} else {
+		hostPort = authHost
+	}
+
+	if auth != "" {
+		username = strings.Split(auth, ":")[0]
+	}
+
+	if hostPort != "" {
+		hostParts := strings.Split(hostPort, ":")
+		host = hostParts[0]
+		if len(hostParts) > 1 {
+			fmt.Sscanf(hostParts[1], "%d", &port)
+		}
+	}
+
+	return map[string]interface{}{
+		"host":     host,
+		"port":     port,
+		"database": database,
+		"username": username,
+	}
+}
+
+func (d *PostgresDriver) GetConnectionInfo() map[string]interface{} {
+	info := d.parseURL()
+	info["driver"] = "postgres"
+	info["status"] = d.status
+	return info
+}
+
+func (d *PostgresDriver) TestConnection(ctx context.Context) map[string]interface{} {
+	err := d.Connect(ctx)
+	success := err == nil
+	info := d.GetConnectionInfo()
+	msg := "Successfully simulated connection to PostgreSQL"
+	if err != nil {
+		msg = err.Error()
+	}
+	return map[string]interface{}{
+		"success": success,
+		"message": msg,
+		"info":    info,
+	}
+}
+
+type MySQLDriver struct {
+	Name             string
+	URL              string
+	status           string
+	lastPingTime     time.Time
+	lastPingResult   bool
+	mu               sync.Mutex
+}
+
+func NewMySQLDriver(name, urlStr string) *MySQLDriver {
+	return &MySQLDriver{
+		Name:   name,
+		URL:    urlStr,
+		status: "DISCONNECTED",
+	}
+}
+
+func (d *MySQLDriver) GetName() string { return d.Name }
+
+func (d *MySQLDriver) Connect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.status = "CONNECTED"
+	return nil
+}
+
+func (d *MySQLDriver) Disconnect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.status = "DISCONNECTED"
+	return nil
+}
+
+func (d *MySQLDriver) Ping(ctx context.Context) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if time.Since(d.lastPingTime) < 1*time.Second {
+		return d.lastPingResult
+	}
+	res := d.status == "CONNECTED"
+	d.lastPingTime = time.Now()
+	d.lastPingResult = res
+	return res
+}
+
+func (d *MySQLDriver) EnsureConnected(ctx context.Context) error {
+	if !d.Ping(ctx) {
+		return d.Connect(ctx)
+	}
+	return nil
+}
+
+func (d *MySQLDriver) Execute(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+func (d *MySQLDriver) Insert(ctx context.Context, table string, payload map[string]interface{}) (map[string]interface{}, error) {
+	return payload, nil
+}
+func (d *MySQLDriver) Update(ctx context.Context, table string, payload map[string]interface{}, filters map[string]interface{}) (map[string]interface{}, error) {
+	return payload, nil
+}
+func (d *MySQLDriver) Delete(ctx context.Context, table string, filters map[string]interface{}) (bool, error) {
+	return true, nil
+}
+
+func (d *MySQLDriver) parseURL() map[string]interface{} {
+	host := "localhost"
+	port := 3306
+	database := "mysql"
+	username := "root"
+
+	cleaned := strings.TrimPrefix(d.URL, "mysql://")
+	cleaned = strings.TrimPrefix(cleaned, "mysqls://")
+
+	parts := strings.Split(cleaned, "/")
+	if len(parts) > 1 {
+		dbPart := parts[1]
+		if idx := strings.Index(dbPart, "?"); idx != -1 {
+			dbPart = dbPart[:idx]
+		}
+		database = dbPart
+	}
+
+	authHost := parts[0]
+	var auth, hostPort string
+	if idx := strings.LastIndex(authHost, "@"); idx != -1 {
+		auth = authHost[:idx]
+		hostPort = authHost[idx+1:]
+	} else {
+		hostPort = authHost
+	}
+
+	if auth != "" {
+		username = strings.Split(auth, ":")[0]
+	}
+
+	if hostPort != "" {
+		hostParts := strings.Split(hostPort, ":")
+		host = hostParts[0]
+		if len(hostParts) > 1 {
+			fmt.Sscanf(hostParts[1], "%d", &port)
+		}
+	}
+
+	return map[string]interface{}{
+		"host":     host,
+		"port":     port,
+		"database": database,
+		"username": username,
+	}
+}
+
+func (d *MySQLDriver) GetConnectionInfo() map[string]interface{} {
+	info := d.parseURL()
+	info["driver"] = "mysql"
+	info["status"] = d.status
+	return info
+}
+
+func (d *MySQLDriver) TestConnection(ctx context.Context) map[string]interface{} {
+	err := d.Connect(ctx)
+	success := err == nil
+	info := d.GetConnectionInfo()
+	msg := "Successfully simulated connection to MySQL"
+	if err != nil {
+		msg = err.Error()
+	}
+	return map[string]interface{}{
+		"success": success,
+		"message": msg,
+		"info":    info,
+	}
 }
 
 type MultiDatabase struct {
@@ -331,8 +754,12 @@ func (mdb *MultiDatabase) RegisterDatabase(name, connStr string) {
 	var driver DatabaseDriver
 	if strings.HasPrefix(connStr, "sqlite") {
 		driver = NewSQLiteDriver(name, connStr)
-	} else if strings.HasPrefix(connStr, "mongodb") {
-		driver = &MongoDriver{Name: name, URL: connStr}
+	} else if strings.HasPrefix(connStr, "mongodb") || strings.HasPrefix(connStr, "mongo") {
+		driver = &MongoDriver{Name: name, URL: connStr, status: "DISCONNECTED"}
+	} else if strings.HasPrefix(connStr, "postgresql") || strings.HasPrefix(connStr, "postgres") {
+		driver = NewPostgresDriver(name, connStr)
+	} else if strings.HasPrefix(connStr, "mysql") {
+		driver = NewMySQLDriver(name, connStr)
 	} else {
 		driver = NewSQLiteDriver(name, connStr) // fallback
 	}
