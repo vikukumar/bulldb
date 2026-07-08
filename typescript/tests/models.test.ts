@@ -202,3 +202,62 @@ describe("TypeScript SQLite Auto-Creation", () => {
   });
 });
 
+describe("TypeScript OOP Database Drivers & Connection Info", () => {
+  const { MultiDatabase, SQLiteDriver, PostgresDriver, MySQLDriver, MongoDriver } = require("../src/database");
+
+  it("should correctly instantiate the respective driver classes based on URL", () => {
+    const db = new MultiDatabase();
+    db.registerDatabase("my_pg", "postgresql://dbuser:secretpass@dbhost:5432/mydb");
+    db.registerDatabase("my_mysql", "mysql://root:password123@127.0.0.1:3306/testdb?charset=utf8");
+    db.registerDatabase("my_mongo", "mongodb://admin:pass@localhost:27017/admindb");
+    db.registerDatabase("my_sqlite", "sqlite://data/store.db");
+
+    expect(db.drivers.get("my_pg")).toBeInstanceOf(PostgresDriver);
+    expect(db.drivers.get("my_mysql")).toBeInstanceOf(MySQLDriver);
+    expect(db.drivers.get("my_mongo")).toBeInstanceOf(MongoDriver);
+    expect(db.drivers.get("my_sqlite")).toBeInstanceOf(SQLiteDriver);
+  });
+
+  it("should parse and return connection info for PostgresDriver", () => {
+    const driver = new PostgresDriver("my_pg", "postgres://dbuser:secretpass@dbhost:5432/mydb");
+    const info = driver.getConnectionInfo();
+    expect(info.driver).toBe("postgres");
+    expect(info.host).toBe("dbhost");
+    expect(info.port).toBe(5432);
+    expect(info.database).toBe("mydb");
+    expect(info.username).toBe("dbuser");
+    expect(info.status).toBe("DISCONNECTED");
+  });
+
+  it("should parse and return connection info for MySQLDriver", () => {
+    const driver = new MySQLDriver("my_mysql", "mysql://root:password123@127.0.0.1:3306/testdb");
+    const info = driver.getConnectionInfo();
+    expect(info.driver).toBe("mysql");
+    expect(info.host).toBe("127.0.0.1");
+    expect(info.port).toBe(3306);
+    expect(info.database).toBe("testdb");
+    expect(info.username).toBe("root");
+    expect(info.status).toBe("DISCONNECTED");
+  });
+
+  it("should parse and return connection info for MongoDriver", () => {
+    const driver = new MongoDriver("my_mongo", "mongodb://admin:pass@localhost:27017/admindb");
+    const info = driver.getConnectionInfo();
+    expect(info.driver).toBe("mongo");
+    expect(info.host).toBe("localhost");
+    expect(info.port).toBe(27017);
+    expect(info.database).toBe("admindb");
+    expect(info.username).toBe("admin");
+    expect(info.status).toBe("DISCONNECTED");
+  });
+
+  it("should test connection status", async () => {
+    const driver = new PostgresDriver("my_pg", "postgres://dbuser:secretpass@dbhost:5432/mydb");
+    const result = await driver.testConnection();
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Successfully simulated connection");
+    expect(result.info.status).toBe("CONNECTED");
+  });
+});
+
+

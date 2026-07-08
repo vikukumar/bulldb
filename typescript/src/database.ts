@@ -53,6 +53,23 @@ export abstract class DatabaseDriver {
   abstract update(table: string, payload: Record<string, any>, filters: Record<string, any>): Promise<any>;
   abstract delete(table: string, filters: Record<string, any>): Promise<boolean>;
 
+  abstract getConnectionInfo(): {
+    driver: string;
+    host?: string;
+    port?: number;
+    database?: string;
+    username?: string;
+    path?: string;
+    status: "CONNECTED" | "DISCONNECTED" | "ERROR";
+    errorMessage?: string;
+  };
+
+  abstract testConnection(): Promise<{
+    success: boolean;
+    message: string;
+    info: any;
+  }>;
+
   async ensureConnected(): Promise<void> {
     try {
       const isHealthy = await this.ping();
@@ -77,46 +94,19 @@ export abstract class DatabaseDriver {
   }
 }
 
-export class SQLiteDriver extends DatabaseDriver {
-  public mockDb: Record<string, any[]> = {}; // Memory fallback driver inside JS
-  private mockSchema = new Map<string, Array<{ name: string; type: string; pk: number }>>();
+export abstract class SQLMockDriver extends DatabaseDriver {
+  public mockDb: Record<string, any[]> = {}; // Memory fallback database
+  protected mockSchema = new Map<string, Array<{ name: string; type: string; pk: number }>>();
+  protected connectionStatus: "CONNECTED" | "DISCONNECTED" | "ERROR" = "DISCONNECTED";
+  protected lastError: Error | null = null;
 
-  async connect(): Promise<void> {
-    const sqlitePrefix = ["sqlite:", "", ""].join("/");
-    if (this.urlStr.startsWith(sqlitePrefix)) {
-      let cleanPath = this.urlStr.slice(sqlitePrefix.length);
-      if (cleanPath.startsWith("/:memory:")) {
-        cleanPath = cleanPath.slice(1);
-      }
-      if (cleanPath.startsWith("/")) {
-        if (/^\/[a-zA-Z]:/.test(cleanPath)) {
-          cleanPath = cleanPath.slice(1);
-        } else {
-          const p = "pro" + "cess";
-          const proc = (globalThis as any)[p];
-          const platform = proc ? proc.platform : "";
-          if (platform === "win32") {
-            cleanPath = cleanPath.slice(1);
-          }
-        }
-      }
-      const qIdx = cleanPath.indexOf("?");
-      if (qIdx !== -1) {
-        cleanPath = cleanPath.slice(0, qIdx);
-      }
-      if (cleanPath !== ":memory:" && cleanPath !== "") {
-        const dir = path.dirname(path.resolve(cleanPath));
-        if (dir && !fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-        if (!fs.existsSync(cleanPath)) {
-          fs.writeFileSync(cleanPath, "");
-        }
-      }
-    }
+  async disconnect(): Promise<void> {
+    this.connectionStatus = "DISCONNECTED";
   }
-  async disconnect(): Promise<void> {}
-  async ping(): Promise<boolean> { return true; }
+
+  async ping(): Promise<boolean> {
+    return this.connectionStatus === "CONNECTED";
+  }
 
   async execute(query: string, params?: any[]): Promise<any[]> {
     if (!this.circuitBreaker.allowRequest()) {
@@ -126,13 +116,13 @@ export class SQLiteDriver extends DatabaseDriver {
       const res = await this.executeInner(query, params);
       this.circuitBreaker.recordSuccess();
       return res;
-    } catch (err) {
+    } catch (err: any) {
       this.circuitBreaker.recordFailure();
       throw err;
     }
   }
 
-  private async executeInner(query: string, params?: any[]): Promise<any[]> {
+  protected async executeInner(query: string, params?: any[]): Promise<any[]> {
     // 1. CREATE TABLE
     const createMatch = query.match(/CREATE TABLE(?: IF NOT EXISTS)?\s+(\w+)\s*\((.+)\)/i);
     if (createMatch) {
@@ -345,10 +335,295 @@ export class SQLiteDriver extends DatabaseDriver {
   }
 }
 
+export class SQLiteDriver extends SQLMockDriver {
+  async connect(): Promise<void> {
+    const sqlitePrefix = ["sqlite:", "", ""].join("/");
+    if (this.urlStr.startsWith(sqlitePrefix)) {
+      let cleanPath = this.urlStr.slice(sqlitePrefix.length);
+      if (cleanPath.startsWith("/:memory:")) {
+        cleanPath = cleanPath.slice(1);
+      }
+      if (cleanPath.startsWith("/")) {
+        if (/^\/[a-zA-Z]:/.test(cleanPath)) {
+          cleanPath = cleanPath.slice(1);
+        } else {
+          const p = "pro" + "cess";
+          const proc = (globalThis as any)[p];
+          const platform = proc ? proc.platform : "";
+          if (platform === "win32") {
+            cleanPath = cleanPath.slice(1);
+          }
+        }
+      }
+      const qIdx = cleanPath.indexOf("?");
+      if (qIdx !== -1) {
+        cleanPath = cleanPath.slice(0, qIdx);
+      }
+      if (cleanPath !== ":memory:" && cleanPath !== "") {
+        const dir = path.dirname(path.resolve(cleanPath));
+        if (dir && !fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        if (!fs.existsSync(cleanPath)) {
+          fs.writeFileSync(cleanPath, "");
+        }
+      }
+    }
+    this.connectionStatus = "CONNECTED";
+  }
+
+  getConnectionInfo() {
+    let cleanPath = this.urlStr;
+    const sqlitePrefix = ["sqlite:", "", ""].join("/");
+    if (this.urlStr.startsWith(sqlitePrefix)) {
+      cleanPath = this.urlStr.slice(sqlitePrefix.length);
+      if (cleanPath.startsWith("/:memory:")) {
+        cleanPath = cleanPath.slice(1);
+      }
+      if (cleanPath.startsWith("/")) {
+        if (/^\/[a-zA-Z]:/.test(cleanPath)) {
+          cleanPath = cleanPath.slice(1);
+        } else {
+          const p = "pro" + "cess";
+          const proc = (globalThis as any)[p];
+          const platform = proc ? proc.platform : "";
+          if (platform === "win32") {
+            cleanPath = cleanPath.slice(1);
+          }
+        }
+      }
+      const qIdx = cleanPath.indexOf("?");
+      if (qIdx !== -1) {
+        cleanPath = cleanPath.slice(0, qIdx);
+      }
+    }
+    return {
+      driver: "sqlite",
+      path: cleanPath || ":memory:",
+      status: this.connectionStatus,
+      errorMessage: this.lastError?.message
+    };
+  }
+
+  async testConnection() {
+    try {
+      await this.connect();
+      return {
+        success: true,
+        message: `Successfully connected to SQLite database at ${this.getConnectionInfo().path}`,
+        info: this.getConnectionInfo()
+      };
+    } catch (err: any) {
+      this.connectionStatus = "ERROR";
+      this.lastError = err;
+      return {
+        success: false,
+        message: `Failed to connect to SQLite: ${err.message}`,
+        info: this.getConnectionInfo()
+      };
+    }
+  }
+}
+
+export class PostgresDriver extends SQLMockDriver {
+  async connect(): Promise<void> {
+    this.connectionStatus = "CONNECTED";
+  }
+
+  private parseUrl() {
+    try {
+      const cleanedUrl = this.urlStr.replace("postgresql://", "").replace("postgres://", "");
+      const [authAndHost, dbPart] = cleanedUrl.split("/");
+      const [auth, hostAndPort] = authAndHost.includes("@") ? authAndHost.split("@") : ["", authAndHost];
+      const [host, portStr] = hostAndPort.split(":");
+      const [username] = auth.split(":");
+      const database = dbPart ? dbPart.split("?")[0] : "";
+      return {
+        host: host || "localhost",
+        port: portStr ? parseInt(portStr, 10) : 5432,
+        database: database || "postgres",
+        username: username || "postgres"
+      };
+    } catch (err) {
+      return {
+        host: "localhost",
+        port: 5432,
+        database: "postgres",
+        username: "postgres"
+      };
+    }
+  }
+
+  getConnectionInfo() {
+    const info = this.parseUrl();
+    return {
+      driver: "postgres",
+      host: info.host,
+      port: info.port,
+      database: info.database,
+      username: info.username,
+      status: this.connectionStatus,
+      errorMessage: this.lastError?.message
+    };
+  }
+
+  async testConnection() {
+    try {
+      await this.connect();
+      const info = this.getConnectionInfo();
+      return {
+        success: true,
+        message: `Successfully simulated connection to PostgreSQL database at ${info.host}:${info.port}`,
+        info
+      };
+    } catch (err: any) {
+      this.connectionStatus = "ERROR";
+      this.lastError = err;
+      return {
+        success: false,
+        message: `Failed to connect to PostgreSQL: ${err.message}`,
+        info: this.getConnectionInfo()
+      };
+    }
+  }
+}
+
+export class MySQLDriver extends SQLMockDriver {
+  async connect(): Promise<void> {
+    this.connectionStatus = "CONNECTED";
+  }
+
+  private parseUrl() {
+    try {
+      const cleanedUrl = this.urlStr.replace("mysql://", "").replace("mysqls://", "");
+      const [authAndHost, dbPart] = cleanedUrl.split("/");
+      const [auth, hostAndPort] = authAndHost.includes("@") ? authAndHost.split("@") : ["", authAndHost];
+      const [host, portStr] = hostAndPort.split(":");
+      const [username] = auth.split(":");
+      const database = dbPart ? dbPart.split("?")[0] : "";
+      return {
+        host: host || "localhost",
+        port: portStr ? parseInt(portStr, 10) : 3306,
+        database: database || "mysql",
+        username: username || "root"
+      };
+    } catch (err) {
+      return {
+        host: "localhost",
+        port: 3306,
+        database: "mysql",
+        username: "root"
+      };
+    }
+  }
+
+  getConnectionInfo() {
+    const info = this.parseUrl();
+    return {
+      driver: "mysql",
+      host: info.host,
+      port: info.port,
+      database: info.database,
+      username: info.username,
+      status: this.connectionStatus,
+      errorMessage: this.lastError?.message
+    };
+  }
+
+  async testConnection() {
+    try {
+      await this.connect();
+      const info = this.getConnectionInfo();
+      return {
+        success: true,
+        message: `Successfully simulated connection to MySQL database at ${info.host}:${info.port}`,
+        info
+      };
+    } catch (err: any) {
+      this.connectionStatus = "ERROR";
+      this.lastError = err;
+      return {
+        success: false,
+        message: `Failed to connect to MySQL: ${err.message}`,
+        info: this.getConnectionInfo()
+      };
+    }
+  }
+}
+
 export class MongoDriver extends DatabaseDriver {
-  async connect(): Promise<void> {}
-  async disconnect(): Promise<void> {}
-  async ping(): Promise<boolean> { return true; }
+  protected connectionStatus: "CONNECTED" | "DISCONNECTED" | "ERROR" = "DISCONNECTED";
+  protected lastError: Error | null = null;
+
+  async connect(): Promise<void> {
+    this.connectionStatus = "CONNECTED";
+  }
+
+  async disconnect(): Promise<void> {
+    this.connectionStatus = "DISCONNECTED";
+  }
+
+  async ping(): Promise<boolean> {
+    return this.connectionStatus === "CONNECTED";
+  }
+
+  private parseUrl() {
+    try {
+      const cleanedUrl = this.urlStr.replace("mongodb://", "").replace("mongodb+srv://", "");
+      const [authAndHost, dbPart] = cleanedUrl.split("/");
+      const [auth, hostAndPort] = authAndHost.includes("@") ? authAndHost.split("@") : ["", authAndHost];
+      const [host, portStr] = hostAndPort.split(":");
+      const [username] = auth.split(":");
+      const database = dbPart ? dbPart.split("?")[0] : "";
+      return {
+        host: host || "localhost",
+        port: portStr ? parseInt(portStr, 10) : 27017,
+        database: database || "admin",
+        username: username || ""
+      };
+    } catch (err) {
+      return {
+        host: "localhost",
+        port: 27017,
+        database: "admin",
+        username: ""
+      };
+    }
+  }
+
+  getConnectionInfo() {
+    const info = this.parseUrl();
+    return {
+      driver: "mongo",
+      host: info.host,
+      port: info.port,
+      database: info.database,
+      username: info.username,
+      status: this.connectionStatus,
+      errorMessage: this.lastError?.message
+    };
+  }
+
+  async testConnection() {
+    try {
+      await this.connect();
+      const info = this.getConnectionInfo();
+      return {
+        success: true,
+        message: `Successfully simulated connection to MongoDB database at ${info.host}:${info.port}`,
+        info
+      };
+    } catch (err: any) {
+      this.connectionStatus = "ERROR";
+      this.lastError = err;
+      return {
+        success: false,
+        message: `Failed to connect to MongoDB: ${err.message}`,
+        info: this.getConnectionInfo()
+      };
+    }
+  }
+
   async execute(query: string, params?: any[]): Promise<any[]> { return []; }
 
   async insert(table: string, payload: Record<string, any>): Promise<any> { return payload; }
@@ -398,8 +673,12 @@ export class MultiDatabase {
     let driver: DatabaseDriver;
     if (urlVal.startsWith("sqlite")) {
       driver = new SQLiteDriver(name, urlVal);
-    } else if (urlVal.startsWith("mongodb")) {
+    } else if (urlVal.startsWith("mongodb") || urlVal.startsWith("mongo")) {
       driver = new MongoDriver(name, urlVal);
+    } else if (urlVal.startsWith("postgresql") || urlVal.startsWith("postgres")) {
+      driver = new PostgresDriver(name, urlVal);
+    } else if (urlVal.startsWith("mysql")) {
+      driver = new MySQLDriver(name, urlVal);
     } else {
       // fallback driver
       driver = new SQLiteDriver(name, urlVal);
