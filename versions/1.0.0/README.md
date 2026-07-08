@@ -89,7 +89,7 @@ SecurityEngine.setEncryptionKey(Buffer.from("my-custom-super-secret-key-32b-leng
 
 #### Go
 ```go
-import "github.com/vikukumar/bulldb/golang/bulldb"
+import "github.com/vikukumar/bulldb"
 
 // Runtime key override
 bulldb.SetEncryptionKey([]byte("my-custom-super-secret-key-32b-length"))
