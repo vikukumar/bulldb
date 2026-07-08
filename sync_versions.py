@@ -96,12 +96,13 @@ def main():
         print("Updated csharp/BullDB/BullDB.csproj")
 
     # 5. Update Go
-    # golang/bulldb/version.go: const Version = "..."
-    go_version_path = "golang/bulldb/version.go"
-    os.makedirs(os.path.dirname(go_version_path), exist_ok=True)
+    # version.go: const Version = "..."
+    go_version_path = "version.go"
+    if os.path.dirname(go_version_path):
+        os.makedirs(os.path.dirname(go_version_path), exist_ok=True)
     with open(go_version_path, "w") as f:
         f.write(f'package bulldb\n\nconst Version = "{version_semver}"\n')
-    print("Updated golang/bulldb/version.go")
+    print("Updated version.go")
 
     # Copy LICENSE.md to all subdirectories to ensure it is always present during builds
     import shutil
@@ -109,9 +110,7 @@ def main():
         "typescript",
         "python",
         "rust/bulldb",
-        "csharp/BullDB",
-        "golang",
-        "golang/bulldb"
+        "csharp/BullDB"
     ]
     for sp in subprojects:
         if os.path.exists(sp):
