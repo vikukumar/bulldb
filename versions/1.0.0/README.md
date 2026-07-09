@@ -37,9 +37,11 @@ Supported languages: **Python**, **TypeScript (Node.js)**, **Go**, **Rust**, and
 ├── sync_versions.py     # Version sync propagation script
 ├── python/              # Python ORM Package
 ├── typescript/          # TypeScript Node ORM Package
-├── golang/              # Go database interface module
 ├── rust/                # Rust high-performance crate
-└── csharp/              # C# (.NET Core) high-performance library
+├── csharp/              # C# (.NET Core) high-performance library
+├── *.go                 # Go database interface module source files
+├── go.mod               # Go module descriptor
+└── go.sum               # Go dependencies checksums
 ```
 
 ---
@@ -132,7 +134,7 @@ A production-grade CI/CD release workflow is configured in [.github/workflows/pu
 - **Python**: Built using Python build and uploaded to **PyPI** via `twine`.
 - **C#**: Packaged via `dotnet pack` and pushed to **NuGet**.
 - **Rust**: Released to **Crates.io** using `cargo publish`.
-- **Go**: Tagged using the format `golang/vX.Y.Z` and pushed to origin, enabling versioned Go module importing.
+- **Go**: Tagged using the standard format `vX.Y.Z` and pushed to origin, enabling versioned Go module importing.
 
 ### Prerequisites (GitHub Repository Secrets)
 To enable the pipeline, configure the following secrets on GitHub:
@@ -150,6 +152,6 @@ To test the package locally in each subfolder:
 
 - **Python**: `cd python && python -m pytest`
 - **TypeScript**: `cd typescript && npm test`
-- **Go**: `cd golang && go test ./...`
+- **Go**: `go test ./...`
 - **Rust**: `cd rust/bulldb && cargo test`
 - **C#**: `cd csharp/BullDB.Tests && dotnet test`

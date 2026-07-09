@@ -798,3 +798,44 @@ html[data-theme="light"] .markdown-body th {
         flex-direction: column;
     }
 }
+
+/* Mermaid Diagram Stylings */
+.mermaid {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2rem;
+    margin: 2.5rem 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: auto;
+    box-shadow: var(--shadow-premium);
+    transition: var(--transition-smooth);
+}
+
+.mermaid:hover {
+    border-color: var(--primary);
+    box-shadow: 0 10px 40px -10px var(--border-glow);
+}
+
+.mermaid svg {
+    max-width: 100% !important;
+    height: auto !important;
+}
+
+/* Custom Scrollbar for Mermaid Overflow */
+.mermaid::-webkit-scrollbar {
+    height: 6px;
+}
+.mermaid::-webkit-scrollbar-track {
+    background: transparent;
+}
+.mermaid::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 10px;
+}
+.mermaid::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
