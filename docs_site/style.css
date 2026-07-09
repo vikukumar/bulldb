@@ -798,3 +798,21 @@ html[data-theme="light"] .markdown-body th {
         flex-direction: column;
     }
 }
+
+/* Mermaid Diagram Stylings */
+.mermaid {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 2rem 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: auto;
+}
+.mermaid svg {
+    max-width: 100% !important;
+    height: auto !important;
+}
+

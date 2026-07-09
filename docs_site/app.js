@@ -38,6 +38,15 @@ document.addEventListener("DOMContentLoaded", () => {
         // Apply initial theme
         document.documentElement.setAttribute("data-theme", state.theme);
         
+        // Initialize Mermaid
+        if (window.mermaid) {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: state.theme === "light" ? "default" : "dark",
+                securityLevel: 'loose'
+            });
+        }
+
         // Setup marked options
         marked.setOptions({
             gfm: true,
@@ -46,7 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
             mangle: false
         });
 
-        // 1. Fetch versions
+        // 1. Fetch versions from local registry
         try {
             const resp = await fetch("versions/list.json");
             if (resp.ok) {
@@ -60,10 +69,30 @@ document.addEventListener("DOMContentLoaded", () => {
             console.log("Using default fallback versions list.", e);
         }
 
-        // 2. Populate version dropdown selector
+        // 2. Enhance version selection by fetching all tags from GitHub API
+        try {
+            const tagsResp = await fetch("https://api.github.com/repos/vikukumar/bulldb/tags");
+            if (tagsResp.ok) {
+                const tagsData = await tagsResp.json();
+                const tagNames = tagsData.map(t => t.name.replace(/^v/, ""));
+                const combined = [...new Set([...state.versions, ...tagNames])];
+                // Sort semver descending
+                combined.sort((a, b) => {
+                    return b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' });
+                });
+                if (combined.length > 0) {
+                    state.versions = combined;
+                    state.currentVersion = combined[0];
+                }
+            }
+        } catch (e) {
+            console.warn("Could not fetch tags from GitHub API, using local versions registry:", e);
+        }
+
+        // 3. Populate version dropdown selector
         populateVersionSelect();
 
-        // 3. Listen to navigation events
+        // 4. Listen to navigation events
         window.addEventListener("hashchange", handleHashChange);
         versionSelect.addEventListener("change", handleVersionSelect);
         themeToggle.addEventListener("click", toggleTheme);
@@ -82,10 +111,10 @@ document.addEventListener("DOMContentLoaded", () => {
             window.location.hash = "#readme";
         });
 
-        // 4. Trigger initial page load
+        // 5. Trigger initial page load
         handleHashChange();
 
-        // 5. Build client search index in background
+        // 6. Build client search index in background
         buildSearchIndex();
     }
 
@@ -106,6 +135,14 @@ document.addEventListener("DOMContentLoaded", () => {
         state.theme = state.theme === "dark" ? "light" : "dark";
         document.documentElement.setAttribute("data-theme", state.theme);
         localStorage.setItem("theme", state.theme);
+        if (window.mermaid) {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: state.theme === "light" ? "default" : "dark",
+                securityLevel: 'loose'
+            });
+        }
+        loadDocument();
     }
 
     // Toggle mobile sidebar active state
@@ -193,6 +230,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 response = await fetch(fallbackPath);
             }
 
+            // If it still fails, load from GitHub raw content directly for this tag/version
+            if (!response.ok) {
+                const gitTag = `v${state.currentVersion}`;
+                let githubRawPath = `https://raw.githubusercontent.com/vikukumar/bulldb/${gitTag}/docs/${state.currentPage}.md`;
+                if (state.currentPage === "README") {
+                    githubRawPath = `https://raw.githubusercontent.com/vikukumar/bulldb/${gitTag}/README.md`;
+                }
+                response = await fetch(githubRawPath);
+            }
+
             if (!response.ok) {
                 throw new Error("Page not found");
             }
@@ -214,6 +261,40 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Render Mermaid diagrams dynamically
+    function renderMermaid() {
+        const blocks = docContent.querySelectorAll("pre code.language-mermaid");
+        if (blocks.length === 0) return;
+
+        blocks.forEach((block, idx) => {
+            const pre = block.parentElement;
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.id = `mermaid-svg-${idx}`;
+            // Extract raw text and replace html entities
+            const temp = document.createElement("textarea");
+            temp.innerHTML = block.innerHTML;
+            div.textContent = temp.value;
+            pre.replaceWith(div);
+        });
+
+        if (window.mermaid) {
+            const mermaidDivs = docContent.querySelectorAll(".mermaid");
+            try {
+                mermaidDivs.forEach(div => {
+                    div.removeAttribute("data-processed");
+                });
+                if (typeof mermaid.init === "function") {
+                    mermaid.init(undefined, mermaidDivs);
+                } else if (typeof mermaid.run === "function") {
+                    mermaid.run({ nodes: mermaidDivs });
+                }
+            } catch (err) {
+                console.error("Mermaid rendering failed:", err);
+            }
+        }
+    }
+
     // Render markdown content using marked.js
     function renderMarkdown(markdown) {
         showProgress(70);
@@ -227,6 +308,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Render HTML content
         docContent.innerHTML = marked.parse(markdown);
+        
+        // Process and render Mermaid blocks
+        renderMermaid();
         
         // Highlight custom pre code keywords
         highlightCodeBlocks();
